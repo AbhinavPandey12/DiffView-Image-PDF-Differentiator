@@ -11,8 +11,6 @@
 </p>
 
 > **DiffView** is an open-source visual document and image comparison web application. It combines high-speed vector rasterization, morphological computer vision clustering, and line-level text diffing to spot subtle modifications, design adjustments, typography edits, and visual alterations with pixel-level precision.
-> Designed with the modern dark-mode aesthetic of [ImgZero Compare PDFs](https://www.imgzero.in/compare-pdfs).
-
 ---
 
 ## 📑 Table of Contents
