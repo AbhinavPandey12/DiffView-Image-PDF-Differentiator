@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Compare PDFs & Images — DiffView</title>
+<meta name="description" content="Compare two PDF documents or images side-by-side with pixel-level visual diffing. 100% private, server-side processing."/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body class="dark">
+
+<!-- ═══ HEADER ═══ -->
+<header id="header">
+  <div class="header-left">
+    <div class="logo">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+    </div>
+    <span class="logo-name">DiffView</span>
+    <div class="header-separator"></div>
+    <span class="header-tagline">Free image tools. Zero uploads. 100% private.</span>
+    <span class="status-dot"></span>
+  </div>
+  <div class="header-right">
+    <button class="header-btn ai-btn" id="theme-toggle" title="Toggle theme">
+      <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
+      <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      Theme
+    </button>
+    <a href="https://github.com/AbhinavPandey12/ShopEase" target="_blank" class="header-btn feedback-btn">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58v-2.23c-3.34.73-4.03-1.42-4.03-1.42-.55-1.39-1.34-1.76-1.34-1.76-1.09-.74.08-.73.08-.73 1.2.08 1.84 1.24 1.84 1.24 1.07 1.83 2.81 1.3 3.49 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.13-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23.96-.27 1.99-.4 3.01-.41 1.02 0 2.05.14 3.01.41 2.28-1.55 3.29-1.23 3.29-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.22 0 4.61-2.81 5.63-5.48 5.92.43.37.82 1.1.82 2.22v3.29c0 .32.19.69.8.58C20.57 21.8 24 17.3 24 12c0-6.63-5.37-12-12-12z"/></svg>
+      GitHub
+    </a>
+  </div>
+</header>
+
+<!-- ═══ LAYOUT ═══ -->
+<div class="layout">
+
+  <!-- ─── MAIN CONTENT ─── -->
+  <main class="main-content">
+
+    <!-- Breadcrumb -->
+    <nav class="breadcrumb">
+      <a href="#">Home</a>
+      <span class="breadcrumb-sep">›</span>
+      <a href="#">PDF Tools</a>
+      <span class="breadcrumb-sep">›</span>
+      <span class="breadcrumb-current">Compare PDF Documents Online</span>
+    </nav>
+
+    <!-- Privacy badge -->
+    <div class="privacy-badge">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      100% Private In-Browser Tool · Zero Uploads
+    </div>
+
+    <!-- Hero -->
+    <div class="page-hero">
+      <h1 class="page-title">Compare PDF Documents Online</h1>
+      <p class="page-subtitle">Instantly spot <em>visual</em>, <em>textual</em>, and <em>layout</em> differences between two PDF versions directly in your browser.</p>
+    </div>
+
+    <!-- Info card -->
+    <div class="info-card">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <div>
+        <strong>Compare PDF Documents</strong> — Compare two versions of a PDF side-by-side with interactive split slider, pixel diff heatmap, and text change analysis.
+        <p style="margin-top:4px;opacity:.65;font-size:13px">Upload two versions of a PDF (e.g. V1 Original and V2 Revised). Both documents are rendered completely in your browser without transmitting data to any server.</p>
+      </div>
+    </div>
+
+    <!-- ── UPLOAD AREA ── -->
+    <div class="upload-row" id="upload-row">
+
+      <!-- File A -->
+      <div class="upload-card" id="card-a">
+        <div class="upload-card-header">
+          <span class="file-badge badge-a">A</span>
+          <span>Original Document (V1)</span>
+        </div>
+        <div class="dropzone" id="drop-a" tabindex="0" role="button" aria-label="Upload original file">
+          <div class="drop-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <p class="drop-text">Drag &amp; drop image files here, or <span class="drop-link">browse</span></p>
+          <p class="drop-hint">Select or drop original PDF (Document A)</p>
+          <div class="file-chosen" id="file-chosen-a" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span id="name-a"></span>
+            <button class="btn-remove" id="rm-a" title="Remove">✕</button>
+          </div>
+          <input type="file" id="inp-a" accept=".pdf,image/*" hidden/>
+        </div>
+      </div>
+
+      <!-- File B -->
+      <div class="upload-card" id="card-b">
+        <div class="upload-card-header">
+          <span class="file-badge badge-b">B</span>
+          <span>Revised Document (V2)</span>
+        </div>
+        <div class="dropzone" id="drop-b" tabindex="0" role="button" aria-label="Upload modified file">
+          <div class="drop-icon">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          </div>
+          <p class="drop-text">Drag &amp; drop image files here, or <span class="drop-link">browse</span></p>
+          <p class="drop-hint">Select or drop modified PDF (Document B)</p>
+          <div class="file-chosen" id="file-chosen-b" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <span id="name-b"></span>
+            <button class="btn-remove" id="rm-b" title="Remove">✕</button>
+          </div>
+          <input type="file" id="inp-b" accept=".pdf,image/*" hidden/>
+        </div>
+      </div>
+    </div>
+
+    <!-- Compare Button -->
+    <div class="compare-row">
+      <button class="btn-compare" id="btn-compare" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Compare Files
+      </button>
+      <span class="compare-hint" id="compare-hint">Upload both files to start comparison</span>
+      <button class="btn-swap" id="btn-swap" title="Swap A and B">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Swap
+      </button>
+    </div>
+
+    <!-- Loading -->
+    <div class="loading-wrap" id="loading-wrap" hidden>
+      <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="loading-label">
+        <div class="spinner"></div>
+        <span id="loading-label">Processing...</span>
+      </div>
+    </div>
+
+    <!-- ── COMPARISON WORKSPACE ── -->
+    <section class="workspace" id="workspace" hidden>
+
+      <!-- Toolbar -->
+      <div class="ws-toolbar">
+        <div class="view-tabs">
+          <button class="vtab active" data-mode="side-by-side" id="vtab-sbs">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="18" rx="1"/><rect x="13" y="3" width="8" height="18" rx="1"/></svg>
+            Side-by-Side
+          </button>
+          <button class="vtab" data-mode="diff" id="vtab-diff">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            Pixel Diff
+          </button>
+          <button class="vtab" data-mode="overlay" id="vtab-ov">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+            Slider Split
+          </button>
+          <button class="vtab" data-mode="flicker" id="vtab-flicker">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Flash Compare
+          </button>
+        </div>
+
+        <!-- Difference Navigator & Highlight Toggle -->
+        <div class="ws-diff-tools">
+          <button class="tb-toggle-btn active" id="btn-toggle-highlights" title="Toggle visual difference boxes on Side-by-Side">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/></svg>
+            Highlights: ON
+          </button>
+
+          <div class="diff-navigator" id="diff-navigator">
+            <button class="tb-btn" id="diff-prev" title="Previous difference (Key: [)">◀</button>
+            <span class="diff-nav-label" id="diff-nav-label">Diff 0 of 0</span>
+            <button class="tb-btn" id="diff-next" title="Next difference (Key: ])">▶</button>
+          </div>
+        </div>
+
+        <div class="ws-toolbar-center">
+          <div class="page-ctrl" id="page-ctrl" hidden>
+            <button class="tb-btn" id="pg-prev">&lt;</button>
+            <span>Page <input type="number" id="pg-input" min="1" value="1"/> of <span id="pg-total">1</span></span>
+            <button class="tb-btn" id="pg-next">&gt;</button>
+          </div>
+        </div>
+
+        <div class="ws-toolbar-right">
+          <div class="sensitivity-ctrl" id="sens-ctrl">
+            <label>Sensitivity <span id="sens-val">10</span></label>
+            <input type="range" id="sens-slider" min="1" max="50" value="10" class="range-slider"/>
+          </div>
+          <div class="zoom-ctrl">
+            <button class="tb-btn" id="zoom-out">-</button>
+            <span class="zoom-label" id="zoom-label">100%</span>
+            <button class="tb-btn" id="zoom-in">+</button>
+            <button class="tb-btn" id="zoom-reset" title="Reset zoom">↺</button>
+          </div>
+          <button class="btn-export" id="btn-export">↓ Export</button>
+        </div>
+      </div>
+
+      <!-- Stats Bar -->
+      <div class="stats-bar" id="stats-bar">
+        <div class="stat"><div class="stat-dot" style="background:#ef4444"></div><strong id="s-changed">0%</strong><span>Changed</span></div>
+        <div class="stat"><div class="stat-dot" style="background:#22c55e"></div><strong id="s-same">100%</strong><span>Identical</span></div>
+        <div class="stat-sep"></div>
+        <div class="stat"><div class="stat-dot" style="background:#6366f1"></div><strong id="s-count">0</strong><span>Differences Found</span></div>
+        <div class="stat-sep"></div>
+        <div class="stat"><span>Dimensions:</span><strong id="s-dims">—</strong></div>
+        <div class="stat"><span>Diff Pixels:</span><strong id="s-px">—</strong></div>
+      </div>
+
+      <!-- ── VIEWS ── -->
+      <!-- 1. Side by Side -->
+      <div class="view-panel active" id="view-sbs">
+        <div class="sbs-grid">
+          <div class="sbs-pane" id="pane-a">
+            <div class="pane-header">
+              <span class="file-badge badge-a badge-sm">A</span>
+              <span id="lbl-a">Original</span>
+              <span class="pane-legend pane-legend-a">Red Highlights = Changes / Deletions</span>
+            </div>
+            <div class="img-scroll" id="scroll-a">
+              <div class="img-wrapper" id="wrap-a">
+                <img id="img-a" alt="File A" draggable="false"/>
+                <div class="diff-spotlight" id="spotlight-a" hidden></div>
+              </div>
+            </div>
+          </div>
+          <div class="sbs-divider"></div>
+          <div class="sbs-pane" id="pane-b">
+            <div class="pane-header">
+              <span class="file-badge badge-b badge-sm">B</span>
+              <span id="lbl-b">Modified</span>
+              <span class="pane-legend pane-legend-b">Green Highlights = Additions / Changes</span>
+            </div>
+            <div class="img-scroll" id="scroll-b">
+              <div class="img-wrapper" id="wrap-b">
+                <img id="img-b" alt="File B" draggable="false"/>
+                <div class="diff-spotlight" id="spotlight-b" hidden></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Visual Diff -->
+      <div class="view-panel" id="view-diff">
+        <div class="diff-controls-bar">
+          <div class="diff-submodes">
+            <button class="submode-btn active" id="sm-heatmap">Red Heatmap</button>
+            <button class="submode-btn" id="sm-3color">3-Color (Add/Remove)</button>
+          </div>
+          <div class="diff-legend" id="diff-legend">
+            <span class="leg-item"><span class="legend-dot" style="background:#ef4444"></span>Removed / Changed</span>
+            <span class="leg-item leg-added" id="leg-added" hidden><span class="legend-dot" style="background:#10b981"></span>Added</span>
+            <span class="leg-item leg-mod" id="leg-mod" hidden><span class="legend-dot" style="background:#f59e0b"></span>Modified</span>
+            <span class="leg-item"><span class="legend-dot" style="background:#cbd5e1"></span>Unchanged Context</span>
+          </div>
+        </div>
+        <div class="img-center"><img id="img-diff" alt="Diff" draggable="false"/></div>
+      </div>
+
+      <!-- 3. Overlay Slider -->
+      <div class="view-panel" id="view-ov">
+        <p class="ov-tip">Drag the center handle left/right to reveal Document B over Document A</p>
+        <div class="ov-container" id="ov-container">
+          <img id="ov-img-a" alt="A" draggable="false"/>
+          <div class="ov-clip" id="ov-clip"><img id="ov-img-b" alt="B" draggable="false"/></div>
+          <div class="ov-line" id="ov-line"></div>
+          <div class="ov-handle" id="ov-handle"><span>&lt;</span><span>&gt;</span></div>
+          <div class="ov-lbl ov-lbl-a">A: Original</div>
+          <div class="ov-lbl ov-lbl-b">B: Modified</div>
+        </div>
+        <div class="ov-opacity">
+          <label>Opacity B: <span id="ov-opval">50%</span></label>
+          <input type="range" id="ov-opacity" min="0" max="100" value="50" class="range-slider"/>
+        </div>
+      </div>
+
+      <!-- 4. Flash / Flicker Mode -->
+      <div class="view-panel" id="view-flicker">
+        <div class="flicker-tip-wrap">
+          <span class="flicker-tip">Click &amp; hold below or press <kbd>Spacebar</kbd> to rapidly flash Document B over Document A</span>
+        </div>
+        <div class="flicker-stage" id="flicker-stage">
+          <img id="img-flicker" alt="Flicker" draggable="false"/>
+          <div class="flicker-state-badge" id="flicker-state-badge">Showing: Document A (Original)</div>
+        </div>
+        <div class="flicker-actions">
+          <button class="btn-flicker-hold" id="btn-flicker-hold">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Press &amp; Hold to Reveal Document B (or hold Space)
+          </button>
+        </div>
+      </div>
+
+      <!-- ── EXCLUSIVE ELEMENT: DETAILED DIFFERENCES INSPECTOR & WRITTEN ANALYSIS ── -->
+      <section class="diff-inspector" id="diff-inspector">
+        <div class="di-header">
+          <div class="di-header-left">
+            <div class="di-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            </div>
+            <div>
+              <h3 class="di-title">Differences Breakdown &amp; Written Analysis</h3>
+              <p class="di-subtitle">Detailed item-by-item breakdown of all detected visual and textual modifications between Document A and Document B</p>
+            </div>
+          </div>
+          <div class="di-badges">
+            <span class="di-pill di-pill-total"><strong id="di-total-count">0</strong> Differences</span>
+            <span class="di-pill di-pill-del"><strong id="di-del-count">0</strong> Removed</span>
+            <span class="di-pill di-pill-add"><strong id="di-add-count">0</strong> Added</span>
+            <span class="di-pill di-pill-mod"><strong id="di-mod-count">0</strong> Modified</span>
+          </div>
+        </div>
+
+        <!-- Written Text Differences (for PDFs with text revisions) -->
+        <div class="di-text-section" id="di-text-section" hidden>
+          <div class="di-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>
+            Written Text Comparison (Line-by-Line)
+          </div>
+          <div class="di-text-list" id="di-text-list"></div>
+        </div>
+
+        <!-- Visual Differences Section (for both PDFs and Images) -->
+        <div class="di-visual-section" id="di-visual-section">
+          <div class="di-section-title">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Visual &amp; Graphical Differences Log
+          </div>
+          <div class="di-cards-grid" id="di-cards-grid"></div>
+        </div>
+      </section>
+
+    </section>
+
+    <!-- ── HOW TO USE ── -->
+    <section class="how-to" id="how-to-use">
+      <div class="ht-header">
+        <p class="ht-tag">Step-by-Step Guide</p>
+        <h2 class="ht-title">How to use Compare PDF Documents Online</h2>
+      </div>
+      <div class="ht-grid">
+        <div class="ht-card">
+          <div class="ht-num">1</div>
+          <h3>Upload Both PDFs</h3>
+          <p>Select or drop your Original Document (A) and Modified Document (B). Supports PDF, PNG, JPG, WebP, BMP, GIF.</p>
+        </div>
+        <div class="ht-card">
+          <div class="ht-num">2</div>
+          <h3>Choose Comparison Mode</h3>
+          <p>Switch between Side-by-Side, Pixel Diff, and Slider Split modes using the toolbar tabs.</p>
+        </div>
+        <div class="ht-card">
+          <div class="ht-num">3</div>
+          <h3>Inspect Differences</h3>
+          <p>Navigate through pages, zoom in to examine changes, and export your comparison result as PNG.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
