@@ -154,10 +154,127 @@ def compute_pixel_diff(img_a: Image.Image, img_b: Image.Image, sensitivity: int 
     arr_a = np.array(img_a.convert('RGB'), dtype=np.float32)
     arr_b = np.array(img_b.convert('RGB'), dtype=np.float32)
 
-    diff = np.abs(arr_a - arr_b)
-    diff_mean = diff.mean(axis=2)
+    diff_0 = np.abs(arr_a - arr_b).mean(axis=2)
+    raw_changed = diff_0 > sensitivity
 
-    changed_mask = diff_mean > sensitivity
+    # If no candidate differences exist under raw direct comparison, exit early
+    if not np.any(raw_changed):
+        changed_mask = raw_changed
+    else:
+        # ── Phase 1: per-pixel micro-jitter suppression (unchanged, ≤5 px) ──────
+        # Eliminates sub-pixel anti-aliasing noise, font kerning drift, and
+        # PDF rasterisation jitter pixel-by-pixel using a circular neighbourhood.
+        micro_shift = 5  # pixel radius for individual-pixel jitter
+        struct = ndimage.generate_binary_structure(2, 2)
+        dilated_raw = ndimage.binary_dilation(raw_changed, structure=struct, iterations=3)
+        labeled, _ = ndimage.label(dilated_raw)
+        slices = ndimage.find_objects(labeled)
+
+        phase1_mask = np.zeros((h, w), dtype=bool)
+
+        micro_shifts = [
+            (dy, dx)
+            for dy in range(-micro_shift, micro_shift + 1)
+            for dx in range(-micro_shift, micro_shift + 1)
+            if (dx != 0 or dy != 0) and (dx * dx + dy * dy <= micro_shift * micro_shift)
+        ]
+
+        for sl in slices:
+            ymin = max(0, sl[0].start - micro_shift)
+            ymax = min(h, sl[0].stop + micro_shift)
+            xmin = max(0, sl[1].start - micro_shift)
+            xmax = min(w, sl[1].stop + micro_shift)
+
+            sub_a = arr_a[ymin:ymax, xmin:xmax]
+            sub_b = arr_b[ymin:ymax, xmin:xmax]
+            sub_h, sub_w, _ = sub_a.shape
+
+            min_diff_a = np.abs(sub_a - sub_b).mean(axis=2)
+            min_diff_b = min_diff_a.copy()
+
+            for dy, dx in micro_shifts:
+                y_a_start, y_a_end = max(0, -dy), min(sub_h, sub_h - dy)
+                x_a_start, x_a_end = max(0, -dx), min(sub_w, sub_w - dx)
+                y_b_start, y_b_end = max(0, dy), min(sub_h, sub_h + dy)
+                x_b_start, x_b_end = max(0, dx), min(sub_w, sub_w + dx)
+
+                d = np.abs(
+                    sub_a[y_a_start:y_a_end, x_a_start:x_a_end] -
+                    sub_b[y_b_start:y_b_end, x_b_start:x_b_end]
+                ).mean(axis=2)
+
+                cur_a = min_diff_a[y_a_start:y_a_end, x_a_start:x_a_end]
+                np.minimum(cur_a, d, out=cur_a)
+
+                cur_b = min_diff_b[y_b_start:y_b_end, x_b_start:x_b_end]
+                np.minimum(cur_b, d, out=cur_b)
+
+            sub_changed = (min_diff_a > sensitivity) | (min_diff_b > sensitivity)
+            phase1_mask[ymin:ymax, xmin:xmax] |= sub_changed
+
+        # ── Phase 2: cluster-level displacement suppression (up to 12 px) ───────
+        # After micro-jitter filtering, surviving clusters are tested as whole
+        # blobs.  For each cluster, the tight crop from doc A is slid across doc B
+        # within a larger radius.  If the entire blob finds a near-identical match
+        # (mean pixel diff ≤ sensitivity × 1.5) anywhere in that window the cluster
+        # is only a positional/orientation shift of the same element and is
+        # suppressed.  Genuine content changes (different shape, colour, text edit,
+        # structural modification) will NOT find a good match and are preserved.
+        MAX_CLUSTER_SHIFT = 12   # pixel radius for whole-cluster displacement test
+        MATCH_THRESHOLD_SCALE = 1.5  # tolerance multiplier relative to sensitivity
+
+        # Grow the phase-1 mask to identify surviving clusters
+        dilated_p1 = ndimage.binary_dilation(phase1_mask, structure=struct, iterations=3)
+        cluster_labels, _ = ndimage.label(dilated_p1)
+        cluster_slices = ndimage.find_objects(cluster_labels)
+
+        changed_mask = np.zeros((h, w), dtype=bool)
+
+        for sl in cluster_slices:
+            # Tight bounding box of this cluster in doc A
+            cy0, cy1 = sl[0].start, sl[0].stop
+            cx0, cx1 = sl[1].start, sl[1].stop
+            crop_h = cy1 - cy0
+            crop_w = cx1 - cx0
+
+            # Skip trivially small clusters (handled by the area filter later)
+            if crop_h * crop_w < 9:
+                continue
+
+            template = arr_a[cy0:cy1, cx0:cx1]  # shape (crop_h, crop_w, 3)
+
+            # Search window in doc B — expand by MAX_CLUSTER_SHIFT on all sides
+            wy0 = max(0, cy0 - MAX_CLUSTER_SHIFT)
+            wy1 = min(h, cy1 + MAX_CLUSTER_SHIFT)
+            wx0 = max(0, cx0 - MAX_CLUSTER_SHIFT)
+            wx1 = min(w, cx1 + MAX_CLUSTER_SHIFT)
+
+            window_b = arr_b[wy0:wy1, wx0:wx1]
+            win_h, win_w, _ = window_b.shape
+
+            best_mean_diff = float('inf')
+
+            # Slide the template across the search window
+            for dy in range(win_h - crop_h + 1):
+                for dx in range(win_w - crop_w + 1):
+                    patch = window_b[dy:dy + crop_h, dx:dx + crop_w]
+                    mean_diff = float(np.abs(template - patch).mean())
+                    if mean_diff < best_mean_diff:
+                        best_mean_diff = mean_diff
+                    # Early exit: already a very good match
+                    if best_mean_diff <= sensitivity * 0.5:
+                        break
+                if best_mean_diff <= sensitivity * 0.5:
+                    break
+
+            # If the best match is within threshold → positional shift → suppress
+            if best_mean_diff <= sensitivity * MATCH_THRESHOLD_SCALE:
+                # Do not add this cluster to changed_mask (suppressed)
+                continue
+
+            # Genuine content difference — keep the phase-1 pixels for this cluster
+            changed_mask[cy0:cy1, cx0:cx1] |= phase1_mask[cy0:cy1, cx0:cx1]
+
     diff_pixels = int(changed_mask.sum())
     total_pixels = w * h
 
