@@ -430,11 +430,29 @@
     els.workspace.hidden = false;
 
     // Update Stats Bar
-    els.sChanged.textContent = `${data.changed_pct}%`;
-    els.sSame.textContent = `${data.same_pct}%`;
-    els.sCount.textContent = (data.differences_count || 0).toString();
-    els.sDims.textContent = `${data.width} × ${data.height} px`;
-    els.sPx.textContent = Number(data.diff_pixels).toLocaleString();
+    if (data.is_completely_different) {
+      els.sChanged.textContent = `${data.changed_pct}%`;
+      els.sSame.textContent = `${data.same_pct}%`;
+      els.sCount.textContent = 'Completely Different';
+      els.sDims.textContent = `${data.width} × ${data.height} px`;
+      els.sPx.textContent = Number(data.diff_pixels).toLocaleString();
+      state.showHighlights = false;
+      if (els.btnToggleHighlights) {
+        els.btnToggleHighlights.classList.remove('active');
+        els.btnToggleHighlights.classList.add('off');
+        els.btnToggleHighlights.title = 'Highlights disabled: sources are completely different';
+        els.btnToggleHighlights.innerHTML = `
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          Highlights: OFF
+        `;
+      }
+    } else {
+      els.sChanged.textContent = `${data.changed_pct}%`;
+      els.sSame.textContent = `${data.same_pct}%`;
+      els.sCount.textContent = (data.differences_count || 0).toString();
+      els.sDims.textContent = `${data.width} × ${data.height} px`;
+      els.sPx.textContent = Number(data.diff_pixels).toLocaleString();
+    }
 
     // Populate Side-by-Side
     updateSideBySideImages();
@@ -468,13 +486,13 @@
 
     // Difference Navigator
     const count = (data.bounding_boxes || []).length;
-    if (count > 0) {
+    if (data.is_completely_different || count === 0) {
+      els.diffNavLabel.textContent = data.is_completely_different ? 'Completely Different' : '0 Differences';
+      els.diffNavigator.style.display = 'none';
+    } else {
       state.currentDiffIndex = 0;
       els.diffNavLabel.textContent = `Diff 1 of ${count}`;
       els.diffNavigator.style.display = 'inline-flex';
-    } else {
-      els.diffNavLabel.textContent = '0 Differences';
-      els.diffNavigator.style.display = 'none';
     }
 
     // Reset overlay split position to 50%
@@ -495,6 +513,9 @@
   // HIGHLIGHTS & SIDE-BY-SIDE VIEW
   // ─────────────────────────────────────────────────────────────
   function toggleHighlights() {
+    if (state.diffData && state.diffData.is_completely_different) {
+      return;
+    }
     state.showHighlights = !state.showHighlights;
 
     if (state.showHighlights) {
@@ -518,6 +539,12 @@
 
   function updateSideBySideImages() {
     if (!state.diffData) return;
+
+    if (state.diffData.is_completely_different) {
+      els.imgA.src = `data:image/png;base64,${state.diffData.img_a_b64}`;
+      els.imgB.src = `data:image/png;base64,${state.diffData.img_b_b64}`;
+      return;
+    }
 
     if (state.showHighlights) {
       els.imgA.src = `data:image/png;base64,${state.diffData.img_a_highlighted_b64 || state.diffData.img_a_b64}`;
@@ -630,6 +657,31 @@
   }
 
   function renderDiffInspector(data) {
+    if (data.is_completely_different) {
+      els.diTotalCount.textContent = 'N/A';
+      els.diDelCount.textContent = '—';
+      els.diAddCount.textContent = '—';
+      els.diModCount.textContent = '—';
+
+      if (els.diTextSection) {
+        els.diTextSection.hidden = true;
+        els.diTextList.innerHTML = '';
+      }
+
+      els.diCardsGrid.innerHTML = `
+        <div class="di-completely-different-banner">
+          <div class="cd-icon">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="cd-content">
+            <h4 class="cd-title">The sources are completely different</h4>
+            <p class="cd-desc">These two documents or images share no common layout, structure, or visual content. Individual visual and graphical difference logs are not applicable and are omitted.</p>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
     const diffs = data.diff_details || [];
     const textDiffs = data.text_diff || [];
     const count = data.differences_count || 0;
