@@ -441,9 +441,11 @@
         els.btnToggleHighlights.classList.remove('active');
         els.btnToggleHighlights.classList.add('off');
         els.btnToggleHighlights.title = 'Highlights disabled: sources are completely different';
+        els.btnToggleHighlights.style.opacity = '0.5';
+        els.btnToggleHighlights.style.pointerEvents = 'none';
         els.btnToggleHighlights.innerHTML = `
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          Highlights: OFF
+          Highlights: N/A
         `;
       }
     } else {
@@ -452,6 +454,18 @@
       els.sCount.textContent = (data.differences_count || 0).toString();
       els.sDims.textContent = `${data.width} × ${data.height} px`;
       els.sPx.textContent = Number(data.diff_pixels).toLocaleString();
+      if (els.btnToggleHighlights) {
+        els.btnToggleHighlights.style.opacity = '';
+        els.btnToggleHighlights.style.pointerEvents = '';
+        if (state.showHighlights) {
+          els.btnToggleHighlights.classList.add('active');
+          els.btnToggleHighlights.classList.remove('off');
+          els.btnToggleHighlights.innerHTML = `
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/></svg>
+            Highlights: ON
+          `;
+        }
+      }
     }
 
     // Populate Side-by-Side
@@ -657,29 +671,29 @@
   }
 
   function renderDiffInspector(data) {
+    const cdNotice = $('di-completely-different-notice');
+    const badges = document.querySelector('.di-badges');
+
     if (data.is_completely_different) {
-      els.diTotalCount.textContent = 'N/A';
-      els.diDelCount.textContent = '—';
-      els.diAddCount.textContent = '—';
-      els.diModCount.textContent = '—';
+      if (cdNotice) cdNotice.style.display = 'flex';
+      if (badges) badges.style.display = 'none';
 
       if (els.diTextSection) {
         els.diTextSection.hidden = true;
         els.diTextList.innerHTML = '';
       }
-
-      els.diCardsGrid.innerHTML = `
-        <div class="di-completely-different-banner">
-          <div class="cd-icon">
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-          </div>
-          <div class="cd-content">
-            <h4 class="cd-title">The sources are completely different</h4>
-            <p class="cd-desc">These two documents or images share no common layout, structure, or visual content. Individual visual and graphical difference logs are not applicable and are omitted.</p>
-          </div>
-        </div>
-      `;
+      if (els.diVisualSection) {
+        els.diVisualSection.hidden = true;
+        els.diVisualSection.style.display = 'none';
+      }
       return;
+    }
+
+    if (cdNotice) cdNotice.style.display = 'none';
+    if (badges) badges.style.display = 'flex';
+    if (els.diVisualSection) {
+      els.diVisualSection.hidden = false;
+      els.diVisualSection.style.display = 'block';
     }
 
     const diffs = data.diff_details || [];

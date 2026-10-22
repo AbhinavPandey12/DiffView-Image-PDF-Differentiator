@@ -529,7 +529,36 @@ input{font-family:var(--font);}
 .di-snippet-a .di-snippet-img{border:2px solid rgba(239,68,68,.6);}
 .di-snippet-b .di-snippet-img{border:2px solid rgba(16,185,129,.6);}
 
-/* Completely Different Banner */
+/* Completely Different Notice & Banner */
+.di-completely-different-notice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 10px;
+  padding: 24px 32px;
+  margin: 18px 0;
+  text-align: center;
+}
+.cd-notice-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(239, 68, 68, 0.16);
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.cd-notice-text {
+  font-size: 18px;
+  font-weight: 700;
+  color: #f87171;
+  letter-spacing: -0.01em;
+}
 .di-completely-different-banner {
   grid-column: 1 / -1;
   display: flex;
