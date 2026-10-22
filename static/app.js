@@ -401,11 +401,27 @@
       });
 
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Server failed to process comparison');
+        let errMsg = `Server error (${response.status})`;
+        try {
+          const err = await response.json();
+          if (err && err.error) errMsg = err.error;
+        } catch {
+          const text = await response.text();
+          if (text) {
+            const clean = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+            if (clean) errMsg = clean.slice(0, 160);
+          }
+        }
+        throw new Error(errMsg);
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        throw new Error('Server returned an unexpected response format. Please try again.');
+      }
+
       state.diffData = data;
       renderComparisonResults(data);
     } catch (err) {

@@ -120,11 +120,25 @@ def pdf_page_to_image(file_bytes: bytes, page_num: int = 1, scale: float = 1.5) 
             pass
 
 
-def normalize_images(img_a: Image.Image, img_b: Image.Image) -> tuple[Image.Image, Image.Image]:
+def normalize_images(img_a: Image.Image, img_b: Image.Image, max_dim: int = 1400) -> tuple[Image.Image, Image.Image]:
     """
+    Constrain maximum dimension to max_dim (preserving aspect ratio) to guarantee fast
+    execution and avoid memory spikes on cloud instances.
     Pad both images to the exact same dimension (max W x max H) with a clean white background.
     Guarantees pixel-by-pixel spatial alignment for comparison.
     """
+    def constrain(img):
+        w, h = img.size
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            new_w = max(1, int(w * scale))
+            new_h = max(1, int(h * scale))
+            return img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+        return img
+
+    img_a = constrain(img_a)
+    img_b = constrain(img_b)
+
     w = max(img_a.width, img_b.width)
     h = max(img_a.height, img_b.height)
 
@@ -145,7 +159,7 @@ def is_exact_same_visual_element(
     by: int,
     bw: int,
     bh: int,
-    max_shift: int = 40,
+    max_shift: int = 20,
     sensitivity: int = 10
 ) -> bool:
     """
@@ -153,10 +167,24 @@ def is_exact_same_visual_element(
     in Document A and Document B is actually the exact same visual diagram/element,
     allowing for sub-pixel anti-aliasing, rasterization variations, stroke-width drift,
     or positional displacements of up to max_shift pixels in any direction.
+
+    Safety rules:
+      - Protects text: Small elements (height <= 26px and width <= 80px) are only tested
+        with micro-shift (<= 4px) so that text words/characters are NEVER falsely matched
+        to other words on nearby lines.
+      - Protects genuine modifications: Requires high morphological overlap (>= 90%)
+        and comparable foreground area ratio (>= 78%) so that shape/connector changes
+        are ALWAYS retained as differences.
+      - Suppresses identical diagrams: If the diagram has the same structure and colors
+        (even with 1-2px stroke variation, rasterization jitter, or small displacement),
+        it is recognized as identical.
     """
     h, w, _ = arr_a.shape
 
-    pad = 6
+    is_small_or_text = (bh <= 26 and bw <= 80)
+    effective_shift = 4 if is_small_or_text else min(max_shift, 20)
+
+    pad = 4
     y0 = max(0, by - pad)
     y1 = min(h, by + bh + pad)
     x0 = max(0, bx - pad)
@@ -179,136 +207,119 @@ def is_exact_same_visual_element(
     # If virtually no foreground in either, treat as unchanged
     if count_a < 4 and count_b < 4:
         return True
+    if (count_a < 4 and count_b >= 10) or (count_b < 4 and count_a >= 10):
+        return False
+
+    area_ratio = min(count_a, count_b) / max(count_a, count_b)
+    if area_ratio < 0.78:
+        return False
 
     struct_2 = ndimage.generate_binary_structure(2, 2)
 
     # ── Fast Path 1: Direct Position Check (tolerant of 1-2px stroke width & anti-aliasing) ──
-    if count_a >= 4 and count_b >= 4:
-        dilated_fg_b = ndimage.binary_dilation(fg_b, structure=struct_2, iterations=2)
-        dilated_fg_a = ndimage.binary_dilation(fg_a, structure=struct_2, iterations=2)
-        cov_a_in_b = float((fg_a & dilated_fg_b).sum()) / count_a
-        cov_b_in_a = float((fg_b & dilated_fg_a).sum()) / count_b
+    dilated_fg_b = ndimage.binary_dilation(fg_b, structure=struct_2, iterations=2)
+    dilated_fg_a = ndimage.binary_dilation(fg_a, structure=struct_2, iterations=2)
+    cov_a_in_b = float((fg_a & dilated_fg_b).sum()) / count_a
+    cov_b_in_a = float((fg_b & dilated_fg_a).sum()) / count_b
 
-        # If both shapes cover each other by 88%+ under 2px dilation
-        if cov_a_in_b >= 0.88 and cov_b_in_a >= 0.88:
-            fg_inter = fg_a & fg_b
-            if fg_inter.sum() >= 4:
-                mean_color_diff = float(np.abs(crop_a[fg_inter] - crop_b[fg_inter]).mean())
-                if mean_color_diff <= max(25.0, sensitivity * 2.2):
-                    return True
-            else:
+    # At direct position, require 92%+ coverage in both directions
+    if cov_a_in_b >= 0.92 and cov_b_in_a >= 0.92:
+        fg_inter = fg_a & fg_b
+        if fg_inter.sum() >= 4:
+            mean_color_diff = float(np.abs(crop_a[fg_inter] - crop_b[fg_inter]).mean())
+            if mean_color_diff <= max(22.0, sensitivity * 2.0):
                 return True
-
-    # ── Path 2: Search for Shifted Match within max_shift ──
-    def find_best_alignment(template_img, fg_mask, search_in_img, src_y, src_x):
-        t_h, t_w, _ = template_img.shape
-        fg_rows, fg_cols = np.where(fg_mask)
-        n_pts = len(fg_rows)
-        if n_pts == 0:
-            return float('inf'), 0, 0
-
-        # Subsample foreground points for fast alignment search
-        if n_pts > 100:
-            idx = np.linspace(0, n_pts - 1, 100, dtype=int)
-            sample_r = fg_rows[idx]
-            sample_c = fg_cols[idx]
         else:
-            sample_r = fg_rows
-            sample_c = fg_cols
-        sample_fg = template_img[sample_r, sample_c]
+            return True
 
-        wy0 = max(0, src_y - max_shift)
-        wy1 = min(h, src_y + t_h + max_shift)
-        wx0 = max(0, src_x - max_shift)
-        wx1 = min(w, src_x + t_w + max_shift)
+    if is_small_or_text:
+        return False
 
-        window = search_in_img[wy0:wy1, wx0:wx1]
-        win_h, win_w, _ = window.shape
-        max_dy = win_h - t_h
-        max_dx = win_w - t_w
-        if max_dy < 0 or max_dx < 0:
-            return float('inf'), 0, 0
+    # ── Path 2: Search for Shifted Match within effective_shift ──
+    t_h, t_w, _ = crop_a.shape
+    fg_rows, fg_cols = np.where(fg_a)
+    n_pts = len(fg_rows)
+    if n_pts == 0:
+        return True
 
-        best_score = float('inf')
-        best_dy, best_dx = 0, 0
+    if n_pts > 80:
+        idx = np.linspace(0, n_pts - 1, 80, dtype=int)
+        sample_r = fg_rows[idx]
+        sample_c = fg_cols[idx]
+    else:
+        sample_r = fg_rows
+        sample_c = fg_cols
+    sample_fg = crop_a[sample_r, sample_c]
 
-        # Step size 2 for coarse search
-        step = 2 if max(max_dy, max_dx) > 10 else 1
-        for dy in range(0, max_dy + 1, step):
-            for dx in range(0, max_dx + 1, step):
+    wy0 = max(0, y0 - effective_shift)
+    wy1 = min(h, y0 + t_h + effective_shift)
+    wx0 = max(0, x0 - effective_shift)
+    wx1 = min(w, x0 + t_w + effective_shift)
+
+    window = arr_b[wy0:wy1, wx0:wx1]
+    win_h, win_w, _ = window.shape
+    max_dy = win_h - t_h
+    max_dx = win_w - t_w
+    if max_dy < 0 or max_dx < 0:
+        return False
+
+    best_score = float('inf')
+    best_dy, best_dx = 0, 0
+
+    step = 3 if max(max_dy, max_dx) > 8 else 1
+    for dy in range(0, max_dy + 1, step):
+        for dx in range(0, max_dx + 1, step):
+            patch = window[dy + sample_r, dx + sample_c]
+            score = float(np.abs(sample_fg - patch).mean())
+            if score < best_score:
+                best_score = score
+                best_dy, best_dx = dy, dx
+            if best_score <= 3.0:
+                break
+        if best_score <= 3.0:
+            break
+
+    if step > 1 and best_score > 3.0:
+        for dy in range(max(0, best_dy - 2), min(max_dy, best_dy + 2) + 1):
+            for dx in range(max(0, best_dx - 2), min(max_dx, best_dx + 2) + 1):
                 patch = window[dy + sample_r, dx + sample_c]
                 score = float(np.abs(sample_fg - patch).mean())
                 if score < best_score:
                     best_score = score
                     best_dy, best_dx = dy, dx
-                if best_score <= 4.0:
-                    break
-            if best_score <= 4.0:
-                break
 
-        # Fine refinement around best position
-        if step > 1 and best_score > 4.0:
-            for dy in range(max(0, best_dy - 2), min(max_dy, best_dy + 2) + 1):
-                for dx in range(max(0, best_dx - 2), min(max_dx, best_dx + 2) + 1):
-                    patch = window[dy + sample_r, dx + sample_c]
-                    score = float(np.abs(sample_fg - patch).mean())
-                    if score < best_score:
-                        best_score = score
-                        best_dy, best_dx = dy, dx
-
-        return best_score, wy0 + best_dy, wx0 + best_dx
-
-    # Verify candidate match using morphological dilated coverage
-    def verify_match(crop_src, fg_src, target_img, target_y, target_x):
-        c_h, c_w, _ = crop_src.shape
-        if target_y + c_h > h or target_x + c_w > w or target_y < 0 or target_x < 0:
-            return False
-
-        target_crop = target_img[target_y:target_y + c_h, target_x:target_x + c_w]
-        fg_target = (target_crop < 235).any(axis=2)
-        cnt_target = int(fg_target.sum())
-        cnt_src = int(fg_src.sum())
-
-        if cnt_target < 4 or cnt_src < 4:
-            return False
-
-        # Area ratio between foreground counts
-        area_ratio = min(cnt_src, cnt_target) / max(cnt_src, cnt_target)
-        if area_ratio < 0.65:
-            return False
-
-        # 2px morphological dilation coverage test
-        dilated_target = ndimage.binary_dilation(fg_target, structure=struct_2, iterations=2)
-        dilated_src = ndimage.binary_dilation(fg_src, structure=struct_2, iterations=2)
-
-        cov_src = float((fg_src & dilated_target).sum()) / cnt_src
-        cov_target = float((fg_target & dilated_src).sum()) / cnt_target
-
-        if cov_src >= 0.86 and cov_target >= 0.86:
-            # Color check on overlapping foreground
-            inter = fg_src & fg_target
-            if inter.sum() >= 4:
-                col_diff = float(np.abs(crop_src[inter] - target_crop[inter]).mean())
-                if col_diff <= max(30.0, sensitivity * 2.5):
-                    return True
-            else:
-                return True
-
+    if best_score > max(24.0, sensitivity * 2.0):
         return False
 
-    # Check A in B
-    if count_a >= 4:
-        score_a, ty_b, tx_b = find_best_alignment(crop_a, fg_a, arr_b, y0, x0)
-        if score_a <= max(30.0, sensitivity * 2.5):
-            if verify_match(crop_a, fg_a, arr_b, ty_b, tx_b):
-                return True
+    target_y = wy0 + best_dy
+    target_x = wx0 + best_dx
+    if target_y + t_h > h or target_x + t_w > w:
+        return False
 
-    # Check B in A
-    if count_b >= 4:
-        score_b, ty_a, tx_a = find_best_alignment(crop_b, fg_b, arr_a, y0, x0)
-        if score_b <= max(30.0, sensitivity * 2.5):
-            if verify_match(crop_b, fg_b, arr_a, ty_a, tx_a):
+    target_crop = arr_b[target_y:target_y + t_h, target_x:target_x + t_w]
+    fg_target = (target_crop < 235).any(axis=2)
+    cnt_target = int(fg_target.sum())
+
+    if cnt_target < 4:
+        return False
+
+    target_area_ratio = min(count_a, cnt_target) / max(count_a, cnt_target)
+    if target_area_ratio < 0.80:
+        return False
+
+    dilated_target = ndimage.binary_dilation(fg_target, structure=struct_2, iterations=2)
+    cov_src = float((fg_a & dilated_target).sum()) / count_a
+    dilated_src = ndimage.binary_dilation(fg_a, structure=struct_2, iterations=2)
+    cov_target = float((fg_target & dilated_src).sum()) / cnt_target
+
+    if cov_src >= 0.90 and cov_target >= 0.90:
+        inter = fg_a & fg_target
+        if inter.sum() >= 4:
+            col_diff = float(np.abs(crop_a[inter] - target_crop[inter]).mean())
+            if col_diff <= max(25.0, sensitivity * 2.0):
                 return True
+        else:
+            return True
 
     return False
 
@@ -387,12 +398,12 @@ def compute_pixel_diff(img_a: Image.Image, img_b: Image.Image, sensitivity: int 
             sub_changed = (min_diff_a > sensitivity) | (min_diff_b > sensitivity)
             phase1_mask[ymin:ymax, xmin:xmax] |= sub_changed
 
-        # ── Phase 2: cluster-level displacement suppression (up to 40 px) ───────
+        # ── Phase 2: cluster-level displacement suppression (up to 20 px) ───────
         # After micro-jitter filtering, surviving clusters are tested as whole
         # elements. If the element finds a matching appearance in the revised document
         # within max_shift pixels (or vice-versa), it is recognized as the same element
         # undergoing minor positional/orientation displacement and is suppressed.
-        MAX_CLUSTER_SHIFT = 40   # pixel radius for whole-cluster displacement test
+        MAX_CLUSTER_SHIFT = 20   # pixel radius for whole-cluster displacement test
 
         # Grow the phase-1 mask to identify surviving clusters
         dilated_p1 = ndimage.binary_dilation(phase1_mask, structure=struct, iterations=3)
@@ -445,7 +456,7 @@ def compute_pixel_diff(img_a: Image.Image, img_b: Image.Image, sensitivity: int 
     bboxes = []
     for b in raw_bboxes:
         bx, by, bw, bh = b['x'], b['y'], b['width'], b['height']
-        if is_exact_same_visual_element(arr_a, arr_b, bx, by, bw, bh, max_shift=40, sensitivity=sensitivity):
+        if is_exact_same_visual_element(arr_a, arr_b, bx, by, bw, bh, max_shift=20, sensitivity=sensitivity):
             # Suppress identical diagram: clear mask pixels so neither side-by-side
             # highlights nor the visual log shows it.
             changed_mask[by:by+bh, bx:bx+bw] = False
@@ -728,39 +739,33 @@ def compare():
 
         # Detect if the two sources are completely different documents
         changed_pct = diff_result['changed_pct']
-        arr_a_f = np.array(img_a_norm.convert('RGB'), dtype=np.float32)
-        arr_b_f = np.array(img_b_norm.convert('RGB'), dtype=np.float32)
-        gray_a = np.mean(arr_a_f, axis=2)
-        gray_b = np.mean(arr_b_f, axis=2)
-        fg_a = gray_a < 240
-        fg_b = gray_b < 240
-        count_a = int(fg_a.sum())
-        count_b = int(fg_b.sum())
-        union_fg = int((fg_a | fg_b).sum())
-        overlap_fg = int((fg_a & fg_b).sum())
-        iou = float(overlap_fg / max(1, union_fg))
-
         is_completely_different = False
-        if changed_pct >= 15.0:
-            if changed_pct >= 40.0:
-                is_completely_different = True
-            elif (count_a < 50 and count_b > 500) or (count_b < 50 and count_a > 500):
+
+        if changed_pct >= 50.0:
+            is_completely_different = True
+        elif changed_pct >= 35.0:
+            arr_a_f = np.array(img_a_norm.convert('RGB'), dtype=np.float32)
+            arr_b_f = np.array(img_b_norm.convert('RGB'), dtype=np.float32)
+            gray_a = np.mean(arr_a_f, axis=2)
+            gray_b = np.mean(arr_b_f, axis=2)
+            fg_a = gray_a < 240
+            fg_b = gray_b < 240
+            count_a = int(fg_a.sum())
+            count_b = int(fg_b.sum())
+            union_fg = int((fg_a | fg_b).sum())
+            overlap_fg = int((fg_a & fg_b).sum())
+            iou = float(overlap_fg / max(1, union_fg))
+
+            if (count_a < 50 and count_b > 500) or (count_b < 50 and count_a > 500):
                 is_completely_different = True
             elif count_a >= 80 and count_b >= 80:
                 struct_cd = ndimage.generate_binary_structure(2, 2)
-                dilated_b = ndimage.binary_dilation(fg_b, structure=struct_cd, iterations=4)
-                dilated_a = ndimage.binary_dilation(fg_a, structure=struct_cd, iterations=4)
+                dilated_b = ndimage.binary_dilation(fg_b, structure=struct_cd, iterations=3)
+                dilated_a = ndimage.binary_dilation(fg_a, structure=struct_cd, iterations=3)
                 cov_a = int((fg_a & dilated_b).sum()) / count_a
                 cov_b = int((fg_b & dilated_a).sum()) / count_b
 
-                changed_fg = int(diff_result['diff_pixels'])
-                changed_fg_ratio = changed_fg / max(1, union_fg)
-
-                if cov_a < 0.15 and cov_b < 0.15 and iou < 0.10:
-                    is_completely_different = True
-                elif changed_fg_ratio >= 0.80 and iou < 0.15:
-                    is_completely_different = True
-                elif changed_pct >= 25.0 and iou < 0.12:
+                if cov_a < 0.08 and cov_b < 0.08 and iou < 0.05:
                     is_completely_different = True
 
         if is_completely_different:
@@ -800,6 +805,21 @@ def compare():
         import traceback
         traceback.print_exc()
         return jsonify({'error': f'Failed to process comparison: {str(exc)}'}), 500
+
+
+@app.errorhandler(400)
+def handle_bad_request(e):
+    return jsonify({'error': str(e.description if hasattr(e, 'description') else e)}), 400
+
+
+@app.errorhandler(413)
+def handle_large_file(e):
+    return jsonify({'error': 'Uploaded file exceeds the maximum size limit of 128MB.'}), 413
+
+
+@app.errorhandler(500)
+def handle_500(e):
+    return jsonify({'error': 'An internal server error occurred while processing the comparison.'}), 500
 
 
 @app.route('/api/page', methods=['POST'])
