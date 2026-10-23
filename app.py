@@ -11,6 +11,7 @@ import os
 import io
 import base64
 import json
+import logging
 import numpy as np
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, ImageOps, ImageDraw
@@ -18,10 +19,45 @@ from scipy import ndimage
 
 # PyMuPDF for fast PDF rendering
 import pymupdf as fitz
+import diff_engine
 
 app = Flask(__name__)
 # Allow uploads up to 128 MB
 app.config['MAX_CONTENT_LENGTH'] = 128 * 1024 * 1024
+app.config['MAX_DIFF_DIMENSION'] = int(os.environ.get('DIFFVIEW_MAX_DIMENSION', '1400'))
+
+ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'}
+ALLOWED_IMAGE_FORMATS = {'PNG', 'JPEG', 'WEBP', 'BMP', 'GIF', 'TIFF'}
+logger = logging.getLogger(__name__)
+
+
+def validate_upload(file_storage) -> bytes:
+    """Read and validate an upload without trusting its browser-provided MIME type."""
+    filename = (file_storage.filename or '').strip()
+    extension = os.path.splitext(filename)[1].lower()
+    if not filename or extension not in ALLOWED_EXTENSIONS:
+        raise ValueError('Unsupported file type. Use PDF, PNG, JPG, WEBP, BMP, GIF, or TIFF.')
+
+    payload = file_storage.read()
+    if not payload:
+        raise ValueError('One or both uploaded files are empty.')
+
+    is_pdf = payload[:1024].lstrip().startswith(b'%PDF-') or extension == '.pdf'
+    if is_pdf:
+        if b'%PDF-' not in payload[:4096]:
+            raise ValueError('The uploaded PDF header is invalid or unreadable.')
+        return payload
+
+    try:
+        with Image.open(io.BytesIO(payload)) as probe:
+            if probe.format not in ALLOWED_IMAGE_FORMATS:
+                raise ValueError('The uploaded image format is not supported.')
+            probe.verify()
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError('The uploaded image is invalid or unreadable.') from exc
+    return payload
 
 
 # ─────────────────────────────────────────────────────────────
@@ -324,7 +360,12 @@ def is_exact_same_visual_element(
     return False
 
 
-def compute_pixel_diff(img_a: Image.Image, img_b: Image.Image, sensitivity: int = 10) -> dict:
+def compute_pixel_diff(
+    img_a: Image.Image,
+    img_b: Image.Image,
+    sensitivity: int = 10,
+    max_dim: int = 1400,
+) -> dict:
     """
     Vectorized NumPy & SciPy pixel difference engine.
     Computes:
@@ -334,7 +375,7 @@ def compute_pixel_diff(img_a: Image.Image, img_b: Image.Image, sensitivity: int 
       4. 3-Color Diff (Red = Removed from A, Green = Added in B, Amber = Modified).
       5. Side-by-Side highlighted images: Document A with Red highlights and Document B with Green highlights.
     """
-    img_a, img_b = normalize_images(img_a, img_b)
+    img_a, img_b = normalize_images(img_a, img_b, max_dim=max(256, int(max_dim)))
     w, h = img_a.size
 
     arr_a = np.array(img_a.convert('RGB'), dtype=np.float32)
@@ -722,89 +763,25 @@ def compare():
         sensitivity = 10
 
     try:
-        bytes_a = file_a.read()
-        bytes_b = file_b.read()
+        bytes_a = validate_upload(file_a)
+        bytes_b = validate_upload(file_b)
 
-        if not bytes_a or not bytes_b:
-            return jsonify({'error': 'One or both uploaded files are empty.'}), 400
+        result = diff_engine.compare_documents(
+            bytes_a=bytes_a,
+            filename_a=file_a.filename or '',
+            bytes_b=bytes_b,
+            filename_b=file_b.filename or '',
+            page=page,
+            sensitivity=sensitivity,
+            max_dim=app.config['MAX_DIFF_DIMENSION']
+        )
+        return jsonify(result)
 
-        img_a, pages_a = file_to_image(bytes_a, file_a.filename, page)
-        img_b, pages_b = file_to_image(bytes_b, file_b.filename, page)
-
-        diff_result = compute_pixel_diff(img_a, img_b, sensitivity)
-        img_a_norm, img_b_norm = normalize_images(img_a, img_b)
-
-        # Extract text differences if files are PDFs
-        text_diff = extract_text_diff(bytes_a, bytes_b, page)
-
-        # Detect if the two sources are completely different documents
-        changed_pct = diff_result['changed_pct']
-        is_completely_different = False
-
-        if changed_pct >= 50.0:
-            is_completely_different = True
-        elif changed_pct >= 35.0:
-            arr_a_f = np.array(img_a_norm.convert('RGB'), dtype=np.float32)
-            arr_b_f = np.array(img_b_norm.convert('RGB'), dtype=np.float32)
-            gray_a = np.mean(arr_a_f, axis=2)
-            gray_b = np.mean(arr_b_f, axis=2)
-            fg_a = gray_a < 240
-            fg_b = gray_b < 240
-            count_a = int(fg_a.sum())
-            count_b = int(fg_b.sum())
-            union_fg = int((fg_a | fg_b).sum())
-            overlap_fg = int((fg_a & fg_b).sum())
-            iou = float(overlap_fg / max(1, union_fg))
-
-            if (count_a < 50 and count_b > 500) or (count_b < 50 and count_a > 500):
-                is_completely_different = True
-            elif count_a >= 80 and count_b >= 80:
-                struct_cd = ndimage.generate_binary_structure(2, 2)
-                dilated_b = ndimage.binary_dilation(fg_b, structure=struct_cd, iterations=3)
-                dilated_a = ndimage.binary_dilation(fg_a, structure=struct_cd, iterations=3)
-                cov_a = int((fg_a & dilated_b).sum()) / count_a
-                cov_b = int((fg_b & dilated_a).sum()) / count_b
-
-                if cov_a < 0.08 and cov_b < 0.08 and iou < 0.05:
-                    is_completely_different = True
-
-        if is_completely_different:
-            diff_result['diff_details'] = []
-            diff_result['bounding_boxes'] = []
-            diff_result['differences_count'] = 0
-            # Ensure highlighted images are clean plain images without boxes
-            diff_result['img_a_highlighted_b64'] = image_to_b64(img_a_norm)
-            diff_result['img_b_highlighted_b64'] = image_to_b64(img_b_norm)
-
-        return jsonify({
-            'success': True,
-            'is_completely_different': is_completely_different,
-            'img_a_b64': image_to_b64(img_a_norm),
-            'img_b_b64': image_to_b64(img_b_norm),
-            'img_a_highlighted_b64': diff_result['img_a_highlighted_b64'],
-            'img_b_highlighted_b64': diff_result['img_b_highlighted_b64'],
-            'diff_b64': diff_result['diff_image_b64'],
-            'diff_3c_b64': diff_result['diff_3c_b64'],
-            'bounding_boxes': diff_result['bounding_boxes'],
-            'diff_details': diff_result['diff_details'],
-            'text_diff': text_diff,
-            'differences_count': diff_result['differences_count'],
-            'changed_pct': diff_result['changed_pct'],
-            'same_pct': diff_result['same_pct'],
-            'diff_pixels': diff_result['diff_pixels'],
-            'total_pixels': diff_result['total_pixels'],
-            'width': diff_result['width'],
-            'height': diff_result['height'],
-            'current_page': page,
-            'total_pages_a': pages_a,
-            'total_pages_b': pages_b,
-            'total_pages': max(pages_a, pages_b),
-        })
-
-    except Exception as exc:
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': f'Failed to process comparison: {str(exc)}'}), 500
+    except ValueError as exc:
+        return jsonify({'error': str(exc)}), 400
+    except Exception:
+        logger.exception('Comparison failed')
+        return jsonify({'error': 'Failed to process the comparison. Check that both files are valid and try again.'}), 500
 
 
 @app.errorhandler(400)

@@ -30,7 +30,11 @@
 
     // Flicker state
     isFlickeringB: false,
+    requestController: null,
   };
+
+  const MAX_FILE_SIZE = 128 * 1024 * 1024;
+  const ALLOWED_EXTENSIONS = /\.(pdf|png|jpe?g|webp|bmp|gif|tiff?)$/i;
 
   // ─────────────────────────────────────────────────────────────
   // DOM SELECTORS
@@ -260,6 +264,13 @@
   function setupDropzone(dropzone, input, onFile) {
     dropzone.addEventListener('click', () => input.click());
 
+    dropzone.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        input.click();
+      }
+    });
+
     input.addEventListener('change', (e) => {
       if (e.target.files && e.target.files[0]) {
         onFile(e.target.files[0]);
@@ -296,6 +307,15 @@
   }
 
   function setFile(which, file) {
+    if (!file || !ALLOWED_EXTENSIONS.test(file.name)) {
+      showToast('Unsupported file type. Choose a PDF or image file.', 'error');
+      return;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      showToast('That file is larger than the 128 MB upload limit.', 'error');
+      return;
+    }
+
     if (which === 'A') {
       state.fileA = file;
       els.nameA.textContent = `${file.name} (${formatFileSize(file.size)})`;
@@ -375,11 +395,29 @@
     }
   }
 
+  function showToast(message, type = 'info') {
+    let toast = document.querySelector('.app-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.className = 'app-toast';
+      toast.setAttribute('role', 'status');
+      toast.setAttribute('aria-live', 'polite');
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.dataset.type = type;
+    toast.classList.add('visible');
+    clearTimeout(showToast.timer);
+    showToast.timer = setTimeout(() => toast.classList.remove('visible'), 4200);
+  }
+
   // ─────────────────────────────────────────────────────────────
   // COMPARISON EXECUTION
   // ─────────────────────────────────────────────────────────────
   async function runComparison(resetPage = true) {
     if (!state.fileA || !state.fileB) return;
+
+    if (state.isComparing) return;
 
     if (resetPage) {
       state.currentPage = 1;
@@ -394,10 +432,14 @@
     formData.append('page', state.currentPage);
     formData.append('sensitivity', state.sensitivity);
 
+    state.requestController?.abort();
+    state.requestController = new AbortController();
+
     try {
       const response = await fetch('/api/compare', {
         method: 'POST',
         body: formData,
+        signal: state.requestController.signal,
       });
 
       if (!response.ok) {
@@ -425,9 +467,12 @@
       state.diffData = data;
       renderComparisonResults(data);
     } catch (err) {
-      alert(`Error comparing documents: ${err.message}`);
+      if (err.name !== 'AbortError') {
+        showToast(`Comparison failed: ${err.message}`, 'error');
+      }
       console.error(err);
     } finally {
+      state.requestController = null;
       setLoading(false);
     }
   }

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Compare PDFs & Images — DiffView</title>
-<meta name="description" content="Compare two PDF documents or images side-by-side with pixel-level visual diffing. 100% private, server-side processing."/>
+<title>DiffView — PDF &amp; Image Comparator</title>
+<meta name="description" content="Compare PDF documents and images with synchronized viewing, pixel-accurate heatmaps, split slider, flash compare, and difference inspection."/>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="/static/style.css"/>
@@ -19,11 +19,11 @@
     </div>
     <span class="logo-name">DiffView</span>
     <div class="header-separator"></div>
-    <span class="header-tagline">Free image tools. Zero uploads. 100% private.</span>
+    <span class="header-tagline">Local workspace · files are processed temporarily</span>
     <span class="status-dot"></span>
   </div>
   <div class="header-right">
-    <button class="header-btn ai-btn" id="theme-toggle" title="Toggle theme">
+      <button type="button" class="header-btn ai-btn" id="theme-toggle" title="Toggle theme" aria-label="Toggle color theme">
       <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/></svg>
       <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
       Theme
@@ -53,21 +53,21 @@
     <!-- Privacy badge -->
     <div class="privacy-badge">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-      100% Private In-Browser Tool · Zero Uploads
+      Files are processed temporarily and are not stored by DiffView
     </div>
 
     <!-- Hero -->
     <div class="page-hero">
-      <h1 class="page-title">Compare PDF Documents Online</h1>
-      <p class="page-subtitle">Instantly spot <em>visual</em>, <em>textual</em>, and <em>layout</em> differences between two PDF versions directly in your browser.</p>
+      <h1 class="page-title">See every change between two files</h1>
+      <p class="page-subtitle">Compare PDFs and images with synchronized viewing, <em>pixel-accurate</em> heatmaps, split slider, flash compare, and a focused differences inspector.</p>
     </div>
 
     <!-- Info card -->
     <div class="info-card">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
       <div>
-        <strong>Compare PDF Documents</strong> — Compare two versions of a PDF side-by-side with interactive split slider, pixel diff heatmap, and text change analysis.
-        <p style="margin-top:4px;opacity:.65;font-size:13px">Upload two versions of a PDF (e.g. V1 Original and V2 Revised). Both documents are rendered completely in your browser without transmitting data to any server.</p>
+        <strong>Built for careful review</strong> — Upload a PDF or image pair, then move from a fast overview to exact visual and textual evidence.
+        <p style="margin-top:4px;opacity:.65;font-size:13px">The Flask service processes uploads in memory for the comparison response; it does not persist them.</p>
       </div>
     </div>
 
@@ -91,7 +91,7 @@
             <span id="name-a"></span>
             <button class="btn-remove" id="rm-a" title="Remove">✕</button>
           </div>
-          <input type="file" id="inp-a" accept=".pdf,image/*" hidden/>
+          <input type="file" id="inp-a" accept=".pdf,image/*" hidden aria-label="Choose original PDF or image"/>
         </div>
       </div>
 
@@ -112,7 +112,7 @@
             <span id="name-b"></span>
             <button class="btn-remove" id="rm-b" title="Remove">✕</button>
           </div>
-          <input type="file" id="inp-b" accept=".pdf,image/*" hidden/>
+          <input type="file" id="inp-b" accept=".pdf,image/*" hidden aria-label="Choose modified PDF or image"/>
         </div>
       </div>
     </div>

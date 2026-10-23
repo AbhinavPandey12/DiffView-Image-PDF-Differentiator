@@ -1,4 +1,4 @@
-# 📄 DiffView — PDF & Image Visual & Textual Comparator
+# DiffView — PDF & Image Visual & Textual Comparator
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+"/>
@@ -10,7 +10,7 @@
   <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="MIT License"/>
 </p>
 
-> **DiffView** is an open-source visual document and image comparison web application. It combines high-speed vector rasterization, morphological computer vision clustering, and line-level text diffing to spot subtle modifications, design adjustments, typography edits, and visual alterations with pixel-level precision.
+> **DiffView** is an open-source visual document and image comparison web application. It combines high-speed vector rasterization, morphological computer vision clustering, and line-level text diffing to spot subtle modifications, design adjustments, typography edits, and visual alterations with pixel-level precision. Uploads are processed in memory by the Flask service and are not persisted.
 ---
 
 ## 📑 Table of Contents
@@ -148,6 +148,14 @@ PDF & Image Comparator/
 ---
 
 ## 🚀 Prerequisites & Installation
+
+### Processing and upload limits
+
+- Comparisons are performed in memory; the application does not write uploaded documents to disk.
+- Uploads are limited to 128 MB per request.
+- Supported formats are PDF, PNG, JPG/JPEG, WebP, BMP, GIF, and TIFF.
+- File signatures are validated server-side instead of trusting the browser-provided MIME type.
+- Set `DIFFVIEW_MAX_DIMENSION` to tune the maximum rendered comparison dimension (default: `1400`).
 
 ### 1. Requirements
 - **Python**: Version `3.10` or higher
