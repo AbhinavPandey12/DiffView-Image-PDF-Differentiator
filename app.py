@@ -16,6 +16,7 @@ import numpy as np
 from flask import Flask, render_template, request, jsonify
 from PIL import Image, ImageOps, ImageDraw
 from scipy import ndimage
+from werkzeug.exceptions import HTTPException
 
 # PyMuPDF for fast PDF rendering
 import pymupdf as fitz
@@ -25,6 +26,9 @@ app = Flask(__name__)
 # Allow uploads up to 128 MB
 app.config['MAX_CONTENT_LENGTH'] = 128 * 1024 * 1024
 app.config['MAX_DIFF_DIMENSION'] = int(os.environ.get('DIFFVIEW_MAX_DIMENSION', '1400'))
+# Always use JSON error handlers for /api/* instead of Werkzeug HTML tracebacks
+# (debug=True would otherwise hide the 500 handler and break the fetch client).
+app.config['PROPAGATE_EXCEPTIONS'] = False
 
 ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'}
 ALLOWED_IMAGE_FORMATS = {'PNG', 'JPEG', 'WEBP', 'BMP', 'GIF', 'TIFF'}
@@ -777,26 +781,60 @@ def compare():
         )
         return jsonify(result)
 
+    except MemoryError:
+        logger.exception('Comparison ran out of memory')
+        return jsonify({
+            'error': 'The PDF is too complex or too large to compare in memory. Try a smaller page size or fewer vector objects.'
+        }), 500
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
     except Exception:
         logger.exception('Comparison failed')
-        return jsonify({'error': 'Failed to process the comparison. Check that both files are valid and try again.'}), 500
+        return jsonify({
+            'error': 'Failed to process the comparison. Check that both files are valid and try again.'
+        }), 500
+
+
+def _api_error_payload(message, status):
+    return jsonify({'error': message}), status
 
 
 @app.errorhandler(400)
 def handle_bad_request(e):
-    return jsonify({'error': str(e.description if hasattr(e, 'description') else e)}), 400
+    return _api_error_payload(str(getattr(e, 'description', e) or 'Bad request'), 400)
+
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    if request.path.startswith('/api/'):
+        return _api_error_payload('Not found.', 404)
+    return e
 
 
 @app.errorhandler(413)
 def handle_large_file(e):
-    return jsonify({'error': 'Uploaded file exceeds the maximum size limit of 128MB.'}), 413
+    return _api_error_payload('Uploaded file exceeds the maximum size limit of 128MB.', 413)
 
 
 @app.errorhandler(500)
 def handle_500(e):
-    return jsonify({'error': 'An internal server error occurred while processing the comparison.'}), 500
+    return _api_error_payload('An internal server error occurred while processing the comparison.', 500)
+
+
+@app.errorhandler(Exception)
+def handle_uncaught(e):
+    """Keep /api/* responses JSON even when Flask debug mode is on."""
+    if isinstance(e, HTTPException):
+        if request.path.startswith('/api/'):
+            return _api_error_payload(str(e.description or e.name), e.code or 500)
+        return e
+    logger.exception('Unhandled server error')
+    if request.path.startswith('/api/'):
+        return _api_error_payload(
+            'An internal server error occurred while processing the comparison.',
+            500,
+        )
+    raise e
 
 
 @app.route('/api/page', methods=['POST'])

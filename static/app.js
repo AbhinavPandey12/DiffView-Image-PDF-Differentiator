@@ -442,28 +442,17 @@
         signal: state.requestController.signal,
       });
 
+      const payload = await readResponseBody(response);
+
       if (!response.ok) {
-        let errMsg = `Server error (${response.status})`;
-        try {
-          const err = await response.json();
-          if (err && err.error) errMsg = err.error;
-        } catch {
-          const text = await response.text();
-          if (text) {
-            const clean = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-            if (clean) errMsg = clean.slice(0, 160);
-          }
-        }
-        throw new Error(errMsg);
+        throw new Error(formatHttpError(response.status, payload));
       }
 
-      let data;
-      try {
-        data = await response.json();
-      } catch (jsonErr) {
+      if (!payload.json || typeof payload.json !== 'object') {
         throw new Error('Server returned an unexpected response format. Please try again.');
       }
 
+      const data = payload.json;
       state.diffData = data;
       renderComparisonResults(data);
     } catch (err) {
@@ -475,6 +464,39 @@
       state.requestController = null;
       setLoading(false);
     }
+  }
+
+  async function readResponseBody(response) {
+    // Read the body once. Calling json() then text() throws
+    // "Failed to execute 'text' on 'Response': body stream already read".
+    const text = await response.text();
+    if (!text) {
+      return { json: null, text: '' };
+    }
+    try {
+      return { json: JSON.parse(text), text };
+    } catch {
+      return { json: null, text };
+    }
+  }
+
+  function formatHttpError(status, payload) {
+    if (payload.json && typeof payload.json.error === 'string' && payload.json.error.trim()) {
+      return payload.json.error;
+    }
+    if (payload.text) {
+      const clean = payload.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (clean) {
+        return clean.slice(0, 220);
+      }
+    }
+    if (status === 413) {
+      return 'Uploaded file exceeds the maximum size limit of 128MB.';
+    }
+    if (status === 502 || status === 504) {
+      return 'The comparison timed out or the server ran out of memory. Try a smaller page or a simpler PDF.';
+    }
+    return `Server error (${status})`;
   }
 
   function setLoading(loading, message = 'Processing...') {
