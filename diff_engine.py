@@ -23,9 +23,11 @@ import difflib
 import hashlib
 import io
 import logging
+import os
 from dataclasses import dataclass
 from typing import Any
 
+import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
 from scipy import ndimage
@@ -41,6 +43,178 @@ except ImportError:
         _HAS_FITZ = True
     except ImportError:
         _HAS_FITZ = False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PDF & Overlay Comparison (User Script Functions)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def pdf_to_image(pdf_path_or_doc, page_num: int, matrix_scale: float = 5.0) -> np.ndarray:
+    """
+    Render a single page of a PDF document at high resolution (Matrix 5x by default).
+    Accepts a filepath (str), raw PDF bytes, or an already open fitz.Document.
+    Returns an RGB uint8 numpy array.
+    """
+    if isinstance(pdf_path_or_doc, str):
+        doc = fitz.open(pdf_path_or_doc)
+        close_doc = True
+    elif isinstance(pdf_path_or_doc, bytes):
+        doc = fitz.open(stream=pdf_path_or_doc, filetype="pdf")
+        close_doc = True
+    else:
+        doc = pdf_path_or_doc
+        close_doc = False
+
+    page = doc[page_num]
+    pix = page.get_pixmap(
+        matrix=fitz.Matrix(matrix_scale, matrix_scale),
+        alpha=False
+    )
+    img = np.frombuffer(
+        pix.samples,
+        dtype=np.uint8
+    ).reshape(
+        pix.height,
+        pix.width,
+        pix.n
+    )
+    if close_doc:
+        doc.close()
+    return img
+
+
+def compare_pdfs_overlay(pdf1, pdf2, bytes1: bytes | None = None, bytes2: bytes | None = None, target_page: int | None = None) -> list[str]:
+    """
+    Compare two PDF documents and save overlay image(s) to 'OverlayComparison/' where:
+      - Common content is preserved
+      - Removed / pixel differences are highlighted in Red
+      - New items / additions are highlighted in Blue
+      - Legend overlay banner is drawn
+    """
+    output_folder = "OverlayComparison"
+    os.makedirs(output_folder, exist_ok=True)
+    doc1 = fitz.open(stream=bytes1, filetype="pdf") if bytes1 else fitz.open(pdf1)
+    doc2 = fitz.open(stream=bytes2, filetype="pdf") if bytes2 else fitz.open(pdf2)
+    pages = min(len(doc1), len(doc2))
+    pdf1_name = os.path.splitext(os.path.basename(pdf1))[0] if pdf1 else "Document_A"
+    pdf2_name = os.path.splitext(os.path.basename(pdf2))[0] if pdf2 else "Document_B"
+    saved_files = []
+
+    page_range = [target_page - 1] if target_page is not None and 1 <= target_page <= pages else range(pages)
+
+    for page_num in page_range:
+        print(f"Processing Page {page_num + 1}")
+        img1 = pdf_to_image(doc1, page_num)
+        img2 = pdf_to_image(doc2, page_num)
+        # Match sizes
+        img2 = cv2.resize(
+            img2,
+            (img1.shape[1], img1.shape[0]),
+            interpolation=cv2.INTER_NEAREST
+        )
+        # Convert to grayscale
+        gray1 = cv2.cvtColor(
+            img1,
+            cv2.COLOR_BGR2GRAY
+        )
+        gray2 = cv2.cvtColor(
+            img2,
+            cv2.COLOR_BGR2GRAY
+        )
+        # Extract non-white content
+        _, mask1 = cv2.threshold(
+            gray1,
+            240,
+            255,
+            cv2.THRESH_BINARY_INV
+        )
+        _, mask2 = cv2.threshold(
+            gray2,
+            240,
+            255,
+            cv2.THRESH_BINARY_INV
+        )
+        # Common
+        common_mask = cv2.bitwise_and(
+            mask1,
+            mask2
+        )
+        # Only in PDF1 (removed / pixel differences)
+        removed_mask = cv2.bitwise_and(
+            mask1,
+            cv2.bitwise_not(mask2)
+        )
+        # Only in PDF2 (new items / additions)
+        added_mask = cv2.bitwise_and(
+            mask2,
+            cv2.bitwise_not(mask1)
+        )
+
+        # Start with original drawing
+        overlay = img1.copy()
+        # Removed -> Red [255, 0, 0] in RGB
+        overlay[removed_mask > 0] = [255, 0, 0]
+        # Added -> Blue [0, 0, 255] in RGB
+        overlay[added_mask > 0] = [0, 0, 255]
+
+        # Legend
+        cv2.rectangle(
+            overlay,
+            (10, 10),
+            (650, 80),
+            (255, 255, 255),
+            -1
+        )
+        cv2.putText(
+            overlay,
+            "GRAY = COMMON",
+            (20, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (100, 100, 100),
+            2
+        )
+        cv2.putText(
+            overlay,
+            "RED = REMOVED",
+            (240, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (255, 0, 0),
+            2
+        )
+        cv2.putText(
+            overlay,
+            "BLUE = ADDED",
+            (470, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 0, 255),
+            2
+        )
+        output_file = os.path.join(
+            output_folder,
+            f"{pdf1_name}_VS_{pdf2_name}_Page_{page_num + 1}.png"
+        )
+        cv2.imwrite(
+            output_file,
+            cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR)
+        )
+        print(
+            f"Saved: {output_file}"
+        )
+        print(
+            f"Removed={np.count_nonzero(removed_mask)}, "
+            f"Added={np.count_nonzero(added_mask)}"
+        )
+        saved_files.append(output_file)
+
+    doc1.close()
+    doc2.close()
+    print(
+        f"\nResults saved in '{output_folder}'"
+    )
+    return saved_files
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -943,6 +1117,31 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
         c.id = i + 1
 
     # 1. Side-by-Side Highlighted Overlays
+    # Compute pixel difference masks matching user's threshold logic (< 240 non-white content)
+    gray_a = cv2.cvtColor(arr_a, cv2.COLOR_RGB2GRAY)
+    gray_b = cv2.cvtColor(arr_b, cv2.COLOR_RGB2GRAY)
+    _, mask_a = cv2.threshold(gray_a, 240, 255, cv2.THRESH_BINARY_INV)
+    _, mask_b = cv2.threshold(gray_b, 240, 255, cv2.THRESH_BINARY_INV)
+
+    removed_pixel_mask = (mask_a > 0) & (mask_b == 0)
+    added_pixel_mask = (mask_b > 0) & (mask_a == 0)
+
+    if changed_pixels_mask is not None and np.any(changed_pixels_mask):
+        removed_pixel_mask |= (changed_pixels_mask & (mask_a > 0))
+        added_pixel_mask |= (changed_pixels_mask & (mask_b > 0))
+
+    # Base A with Red pixel differences
+    arr_a_hl = arr_a.copy()
+    if np.any(removed_pixel_mask):
+        arr_a_hl[removed_pixel_mask] = [220, 38, 38]
+    img_a_base = Image.fromarray(arr_a_hl, 'RGB')
+
+    # Base B with Blue new items
+    arr_b_hl = arr_b.copy()
+    if np.any(added_pixel_mask):
+        arr_b_hl[added_pixel_mask] = [37, 99, 235]
+    img_b_base = Image.fromarray(arr_b_hl, 'RGB')
+
     ov_a = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     ov_b = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw_oa = ImageDraw.Draw(ov_a)
@@ -957,18 +1156,19 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
 
         if c.change_type == 'removed':
             draw_oa.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(239, 68, 68, 55), outline=(239, 68, 68, 230), width=2)
+                                      fill=(239, 68, 68, 45), outline=(239, 68, 68, 220), width=2)
         elif c.change_type == 'added':
             draw_ob.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(16, 185, 129, 55), outline=(16, 185, 129, 230), width=2)
+                                      fill=(37, 99, 235, 45), outline=(37, 99, 235, 220), width=2)
         else:
+            # Modified: Red on Document A, Blue on Document B
             draw_oa.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(245, 158, 11, 55), outline=(245, 158, 11, 230), width=2)
+                                      fill=(239, 68, 68, 45), outline=(239, 68, 68, 220), width=2)
             draw_ob.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(245, 158, 11, 55), outline=(245, 158, 11, 230), width=2)
+                                      fill=(37, 99, 235, 45), outline=(37, 99, 235, 220), width=2)
 
-    img_a_highlighted = Image.alpha_composite(img_a_clean.convert('RGBA'), ov_a).convert('RGB')
-    img_b_highlighted = Image.alpha_composite(img_b_clean.convert('RGBA'), ov_b).convert('RGB')
+    img_a_highlighted = Image.alpha_composite(img_a_base.convert('RGBA'), ov_a).convert('RGB')
+    img_b_highlighted = Image.alpha_composite(img_b_base.convert('RGBA'), ov_b).convert('RGB')
 
     # 2. High-Contrast Heatmap Diff
     diff_canvas = np.full((h, w, 3), 255, dtype=np.uint8)
@@ -1009,9 +1209,14 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
             if c.change_type == 'removed':
                 diff_3c[cy0:cy1, cx0:cx1] = [239, 68, 68]
             elif c.change_type == 'added':
-                diff_3c[cy0:cy1, cx0:cx1] = [16, 185, 129]
+                diff_3c[cy0:cy1, cx0:cx1] = [37, 99, 235]
             else:
                 diff_3c[cy0:cy1, cx0:cx1] = [245, 158, 11]
+
+    if np.any(removed_pixel_mask):
+        diff_3c[removed_pixel_mask] = [239, 68, 68]
+    if np.any(added_pixel_mask):
+        diff_3c[added_pixel_mask] = [37, 99, 235]
 
     diff_3c_img = Image.fromarray(diff_3c, 'RGB')
     draw_3c = ImageDraw.Draw(diff_3c_img)
@@ -1250,6 +1455,18 @@ def compare_documents(bytes_a: bytes, filename_a: str,
 
             # Line-level difflib for inspector
             text_diff = extract_text_diff(bytes_a, bytes_b, page)
+
+            # Generate and save overlay to 'OverlayComparison' folder as requested
+            try:
+                compare_pdfs_overlay(
+                    pdf1=filename_a,
+                    pdf2=filename_b,
+                    bytes1=bytes_a,
+                    bytes2=bytes_b,
+                    target_page=page
+                )
+            except Exception as ov_err:
+                logger.warning(f"compare_pdfs_overlay execution warning: {ov_err}")
         finally:
             for _doc in (doc_a, doc_b):
                 try:
@@ -1303,6 +1520,33 @@ def compare_documents(bytes_a: bytes, filename_a: str,
         if is_pdf_a and is_pdf_b:
             text_diff = extract_text_diff(bytes_a, bytes_b, page)
 
+        # Generate and save overlay to 'OverlayComparison' folder for image comparisons
+        try:
+            output_folder = "OverlayComparison"
+            os.makedirs(output_folder, exist_ok=True)
+            name_a = os.path.splitext(os.path.basename(filename_a))[0] if filename_a else "File_A"
+            name_b = os.path.splitext(os.path.basename(filename_b))[0] if filename_b else "File_B"
+            gray1 = cv2.cvtColor(arr_a, cv2.COLOR_RGB2GRAY)
+            gray2 = cv2.cvtColor(arr_b, cv2.COLOR_RGB2GRAY)
+            _, mask1 = cv2.threshold(gray1, 240, 255, cv2.THRESH_BINARY_INV)
+            _, mask2 = cv2.threshold(gray2, 240, 255, cv2.THRESH_BINARY_INV)
+            removed_mask = cv2.bitwise_and(mask1, cv2.bitwise_not(mask2))
+            added_mask = cv2.bitwise_and(mask2, cv2.bitwise_not(mask1))
+            overlay = arr_a.copy()
+            overlay[removed_mask > 0] = [255, 0, 0]
+            overlay[added_mask > 0] = [0, 0, 255]
+            cv2.rectangle(overlay, (10, 10), (650, 80), (255, 255, 255), -1)
+            cv2.putText(overlay, "GRAY = COMMON", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 100, 100), 2)
+            cv2.putText(overlay, "RED = REMOVED", (240, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
+            cv2.putText(overlay, "BLUE = ADDED", (470, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+            out_file = os.path.join(output_folder, f"{name_a}_VS_{name_b}_Page_{page}.png")
+            cv2.imwrite(out_file, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
+            print(f"Saved: {out_file}")
+            print(f"Removed={np.count_nonzero(removed_mask)}, Added={np.count_nonzero(added_mask)}")
+            print(f"\nResults saved in '{output_folder}'")
+        except Exception as ov_err:
+            logger.warning(f"Image overlay comparison warning: {ov_err}")
+
     img_a_clean = Image.fromarray(arr_a, 'RGB')
     img_b_clean = Image.fromarray(arr_b, 'RGB')
 
@@ -1345,3 +1589,13 @@ def compare_documents(bytes_a: bytes, filename_a: str,
     res['total_pages'] = max(pages_a, pages_b)
 
     return res
+
+
+if __name__ == '__main__':
+    pdf1 = r"SameSize/6866VBE92991338060W001 SH26 1 (1).pdf"
+    pdf2 = r"SameSize/6866VBE92991338062W001 SH43 1 (1).pdf"
+    if os.path.exists(pdf1) and os.path.exists(pdf2):
+        compare_pdfs_overlay(pdf1, pdf2)
+    else:
+        print("DiffView difference engine initialized.")
+

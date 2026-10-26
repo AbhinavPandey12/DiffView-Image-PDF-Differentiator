@@ -43,3 +43,5 @@ temp/
 scratch/
 _tmp*
 *.tmp
+OverlayComparison/
+

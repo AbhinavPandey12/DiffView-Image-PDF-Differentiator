@@ -21,6 +21,7 @@ from werkzeug.exceptions import HTTPException
 # PyMuPDF for fast PDF rendering
 import pymupdf as fitz
 import diff_engine
+from diff_engine import compare_pdfs_overlay, pdf_to_image
 
 app = Flask(__name__)
 # Allow uploads up to 128 MB
@@ -582,13 +583,13 @@ def compute_pixel_diff(
         )
     img_a_highlighted = Image.alpha_composite(img_a, ov_a)
 
-    # Document B with emerald green highlights on added/altered parts
+    # Document B with vivid blue highlights on added/altered parts
     ov_b = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw_ob = ImageDraw.Draw(ov_b)
     for b in bboxes:
         draw_ob.rounded_rectangle(
             [b['x'] - 3, b['y'] - 3, b['x'] + b['width'] + 3, b['y'] + b['height'] + 3],
-            radius=4, fill=(16, 185, 129, 50), outline=(16, 185, 129, 220), width=2
+            radius=4, fill=(37, 99, 235, 50), outline=(37, 99, 235, 220), width=2
         )
     img_b_highlighted = Image.alpha_composite(img_b, ov_b)
 
