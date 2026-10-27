@@ -486,6 +486,9 @@
     }
     if (payload.text) {
       const clean = payload.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      if (/internal server error/i.test(clean)) {
+        return 'The server encountered an error while processing this comparison. If your document is an unusually large or complex PDF, try reducing the page size or comparing individual pages.';
+      }
       if (clean) {
         return clean.slice(0, 220);
       }
@@ -789,24 +792,61 @@
     let delCount = 0;
     let addCount = 0;
     let modCount = 0;
+    let textCount = 0;
 
     diffs.forEach((d) => {
       if (d.change_type === 'removed') delCount++;
       else if (d.change_type === 'added') addCount++;
       else modCount++;
+
+      if (d.source === 'text' || d.original_text || d.revised_text) {
+        textCount++;
+      }
     });
 
     els.diDelCount.textContent = delCount.toString();
     els.diAddCount.textContent = addCount.toString();
     els.diModCount.textContent = modCount.toString();
 
-    // 1. Written Text Differences (Line-by-Line comparison)
-    if (textDiffs && textDiffs.length > 0) {
+    const pillText = $('di-pill-text');
+    const textCountEl = $('di-text-count');
+    if (pillText && textCountEl) {
+      const totalTextChanges = textCount > 0 ? textCount : (textDiffs ? textDiffs.length : 0);
+      if (totalTextChanges > 0) {
+        textCountEl.textContent = totalTextChanges.toString();
+        pillText.style.display = 'inline-flex';
+      } else {
+        pillText.style.display = 'none';
+      }
+    }
+
+    // 1. Written Text Differences (Line-by-Line & Word-by-Word comparison)
+    let effectiveTextDiffs = (textDiffs && textDiffs.length > 0) ? [...textDiffs] : [];
+    if (effectiveTextDiffs.length === 0 && textCount > 0) {
+      diffs.forEach((d) => {
+        if (d.source === 'text' || d.original_text || d.revised_text) {
+          effectiveTextDiffs.push({
+            type: d.change_type === 'removed' ? 'deleted' : (d.change_type === 'added' ? 'added' : 'modified'),
+            original: d.original_text || '',
+            revised: d.revised_text || '',
+            id: d.id,
+          });
+        }
+      });
+    }
+
+    if (effectiveTextDiffs.length > 0) {
       els.diTextSection.hidden = false;
+      els.diTextSection.style.display = 'block';
       els.diTextList.innerHTML = '';
-      textDiffs.forEach((item, idx) => {
+      effectiveTextDiffs.forEach((item, idx) => {
         const card = document.createElement('div');
         card.className = 'di-text-card';
+        if (item.id) {
+          card.style.cursor = 'pointer';
+          card.title = 'Click to spotlight this text difference on documents';
+          card.addEventListener('click', () => focusDifference(item.id));
+        }
         const typeClass =
           item.type === 'modified'
             ? 'type-modified'
@@ -823,8 +863,10 @@
           compHtml += `<div class="text-line-rev"><span style="user-select:none;opacity:0.65;font-weight:700;margin-right:6px;">Revised (B):</span>${escapeHtml(item.revised)}</div>`;
         }
 
+        const idBadge = item.id ? `<span class="di-card-id" style="font-size:11px;">Diff #${item.id}</span>` : '';
         card.innerHTML = `
           <div class="di-text-header">
+            ${idBadge}
             <span class="di-type-badge ${typeClass}">${typeLabel}</span>
             <span style="font-size:11.5px;color:var(--subtle);font-weight:600;">Text Revision #${idx + 1}</span>
           </div>
@@ -836,6 +878,7 @@
       });
     } else {
       els.diTextSection.hidden = true;
+      els.diTextSection.style.display = 'none';
       els.diTextList.innerHTML = '';
     }
 
@@ -854,11 +897,35 @@
             ? 'type-added'
             : 'type-modified';
 
+        const isTextDiff = item.source === 'text' || Boolean(item.original_text || item.revised_text);
+        const sourceBadge = isTextDiff
+          ? `<span class="di-source-badge di-source-text">TEXT</span>`
+          : (item.source && item.source !== 'visual' && item.source !== 'pixel'
+              ? `<span class="di-source-badge di-source-${item.source}">${escapeHtml(item.source.toUpperCase())}</span>`
+              : '');
+
+        let textComparisonBlock = '';
+        if (isTextDiff && (item.original_text || item.revised_text)) {
+          let origLine = item.original_text
+            ? `<div class="text-line-orig"><span style="user-select:none;opacity:0.75;font-weight:700;margin-right:6px;">Original:</span>${escapeHtml(item.original_text)}</div>`
+            : '';
+          let revLine = item.revised_text
+            ? `<div class="text-line-rev"><span style="user-select:none;opacity:0.75;font-weight:700;margin-right:6px;">Revised:</span>${escapeHtml(item.revised_text)}</div>`
+            : '';
+          textComparisonBlock = `
+            <div class="di-card-text-diff">
+              ${origLine}
+              ${revLine}
+            </div>
+          `;
+        }
+
         card.innerHTML = `
           <div class="di-card-top">
-            <div style="display:flex;align-items:center;gap:6px;">
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
               <span class="di-card-id">Diff #${item.id}</span>
               <span class="di-type-badge ${badgeClass}">${escapeHtml(item.change_type.toUpperCase())}</span>
+              ${sourceBadge}
             </div>
             <span class="di-card-loc">X: ${item.x}, Y: ${item.y} (${item.width}×${item.height}px)</span>
             <button class="di-focus-btn" type="button" title="Locate &amp; spotlight this difference on documents">
@@ -867,6 +934,7 @@
             </button>
           </div>
           <div class="di-card-desc">${escapeHtml(item.description)}</div>
+          ${textComparisonBlock}
           <div class="di-snippets">
             <div class="di-snippet-pane di-snippet-a">
               <span class="di-snippet-label">Original (Doc A)</span>

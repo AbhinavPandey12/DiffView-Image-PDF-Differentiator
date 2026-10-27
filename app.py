@@ -641,8 +641,11 @@ def compute_pixel_diff(
             'width': bw,
             'height': bh,
             'change_type': change_type,
+            'source': 'pixel',
             'label': label,
             'description': desc,
+            'original_text': '',
+            'revised_text': '',
             'thumb_a_b64': thumb_a,
             'thumb_b_b64': thumb_b,
         })
@@ -793,11 +796,12 @@ def compare():
         }), 500
     except ValueError as exc:
         return jsonify({'error': str(exc)}), 400
-    except Exception:
-        logger.exception('Comparison failed')
-        return jsonify({
-            'error': 'Failed to process the comparison. Check that both files are valid and try again.'
-        }), 500
+    except Exception as exc:
+        logger.exception('Comparison failed: %s', exc)
+        err_msg = str(exc).strip()
+        if not err_msg:
+            err_msg = 'Failed to process the comparison. Check that both files are valid and try again.'
+        return jsonify({'error': err_msg}), 500
 
 
 def _api_error_payload(message, status):

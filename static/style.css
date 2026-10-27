@@ -491,6 +491,29 @@ button:focus-visible,input:focus-visible,.dropzone:focus-visible,a:focus-visible
   padding:4px 8px;border-radius:4px;
   background:rgba(59,130,246,.1);color:#93c5fd;border-left:3px solid #3b82f6;
 }
+.di-pill-text{background:rgba(99,102,241,.15);color:#a5b4fc;border:1px solid rgba(99,102,241,.3);}
+.di-source-badge{
+  font-size:9.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;
+  padding:2px 6px;border-radius:4px;
+}
+.di-source-text{
+  background:rgba(99,102,241,.2);color:#a5b4fc;border:1px solid rgba(99,102,241,.35);
+}
+.di-source-drawing{
+  background:rgba(16,185,129,.18);color:#6ee7b7;border:1px solid rgba(16,185,129,.35);
+}
+.di-source-image{
+  background:rgba(236,72,153,.18);color:#f472b6;border:1px solid rgba(236,72,153,.35);
+}
+.di-card-text-diff{
+  display:flex;flex-direction:column;gap:5px;
+  font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11.5px;
+  background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:6px 8px;
+}
+.di-card-text-diff .text-line-orig,
+.di-card-text-diff .text-line-rev{
+  padding:3px 6px;font-size:11.5px;word-break:break-word;
+}
 
 /* Visual Differences Cards Grid */
 .di-cards-grid{
