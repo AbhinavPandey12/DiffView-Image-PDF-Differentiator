@@ -155,7 +155,7 @@ DiffView utilizes a dual-engine architecture: a specialized multi-stage hybrid e
 
 ## ⚡ Dense Engineering & CAD Drawing Optimization
 
-Technical schematics (e.g., Airbus aircraft wiring schematics, architectural CAD blueprints, and circuit layouts) often contain **over 9,000 vector drawing paths** per page.
+Technical and Complicated schematics (e.g., Aircraft wiring schematics, architectural CAD blueprints, and circuit layouts) often contain **over 9,000 vector drawing paths** per page.
 
 A naive pairwise comparison algorithm has $O(N \times M)$ complexity. Comparing two pages with 9,200 paths each requires over **84,640,000 polygon distance checks**, causing requests to run for 13+ minutes or hit server gateway timeouts.
 
@@ -166,7 +166,7 @@ A naive pairwise comparison algorithm has $O(N \times M)$ complexity. Comparing 
    - Drawing elements from Document B are indexed into spatial grid buckets based on their bounding coordinates in $O(M)$ time.
    - Drawing elements from Document A query only their localized neighboring buckets rather than iterating through all 9,200 elements.
 3. **Performance Benchmark**:
-   - **Airbus 6866VB Schematics (9,201 vector paths)**:
+   - **6866VB Schematics (9,201 vector paths)**:
      - *Naive approach*: ~810 seconds (>13 minutes).
      - *DiffView 2D Spatial Grid*: **3.4 seconds** (99.6% reduction in latency).
 
