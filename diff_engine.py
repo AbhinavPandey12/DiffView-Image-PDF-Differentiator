@@ -1389,8 +1389,17 @@ def compare_documents(bytes_a: bytes, filename_a: str,
 
     pages_a = 1
     pages_b = 1
-    text_diff = []
+    text_diff: list[dict] = []
     matched_word_count = 0
+
+    # Pre-initialize all variables used after the if/else block.
+    # This prevents UnboundLocalError if an exception is raised partway
+    # through the both_are_pdfs try block (e.g. during page rendering),
+    # since the finally clause still runs but the variables would be unbound.
+    arr_a: np.ndarray = np.zeros((1, 1, 3), dtype=np.uint8)
+    arr_b: np.ndarray = np.zeros((1, 1, 3), dtype=np.uint8)
+    all_changes: list[Change] = []
+    changed_pixels_mask: np.ndarray = np.zeros((1, 1), dtype=bool)
 
     if both_are_pdfs:
         doc_a = None
@@ -1423,7 +1432,7 @@ def compare_documents(bytes_a: bytes, filename_a: str,
             arr_a, arr_b = _pad_bottom_right(arr_a_raw, arr_b_raw)
             H, W = arr_a.shape[:2]
 
-            all_changes: list[Change] = []
+            all_changes = []
             handled_mask = np.zeros((H, W), dtype=bool)
 
             # 1. Text comparison (pinpoint word boxes)
@@ -1456,17 +1465,6 @@ def compare_documents(bytes_a: bytes, filename_a: str,
             # Line-level difflib for inspector
             text_diff = extract_text_diff(bytes_a, bytes_b, page)
 
-            # Generate and save overlay to 'OverlayComparison' folder as requested
-            try:
-                compare_pdfs_overlay(
-                    pdf1=filename_a,
-                    pdf2=filename_b,
-                    bytes1=bytes_a,
-                    bytes2=bytes_b,
-                    target_page=page
-                )
-            except Exception as ov_err:
-                logger.warning(f"compare_pdfs_overlay execution warning: {ov_err}")
         finally:
             for _doc in (doc_a, doc_b):
                 try:
@@ -1477,34 +1475,38 @@ def compare_documents(bytes_a: bytes, filename_a: str,
 
     else:
         # Non-PDF or mixed PDF-Image comparison
-        img_a, pages_a = _load_image(bytes_a, filename_a, page, max_dim)
-        img_b, pages_b = _load_image(bytes_b, filename_b, page, max_dim)
+        img_a_pil, pages_a = _load_image(bytes_a, filename_a, page, max_dim)
+        img_b_pil, pages_b = _load_image(bytes_b, filename_b, page, max_dim)
 
-        ar_a = img_a.width / max(1, img_a.height)
-        ar_b = img_b.width / max(1, img_b.height)
+        # Ensure both are white-background RGB (no alpha channel)
+        img_a_pil = _convert_to_white_bg_rgb(img_a_pil)
+        img_b_pil = _convert_to_white_bg_rgb(img_b_pil)
+
+        ar_a = img_a_pil.width / max(1, img_a_pil.height)
+        ar_b = img_b_pil.width / max(1, img_b_pil.height)
 
         # If aspect ratios match within ~2%, scale both to same size before diff
         if abs(ar_a - ar_b) / max(ar_a, ar_b) <= 0.02:
-            target_w = max(img_a.width, img_b.width)
-            target_h = max(img_a.height, img_b.height)
+            target_w = max(img_a_pil.width, img_b_pil.width)
+            target_h = max(img_a_pil.height, img_b_pil.height)
             if max(target_w, target_h) > max_dim:
-                scale = max_dim / max(target_w, target_h)
-                target_w = max(1, int(target_w * scale))
-                target_h = max(1, int(target_h * scale))
-            img_a = img_a.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            img_b = img_b.resize((target_w, target_h), Image.Resampling.LANCZOS)
-            arr_a = np.array(img_a, dtype=np.uint8)
-            arr_b = np.array(img_b, dtype=np.uint8)
+                scale_f = max_dim / max(target_w, target_h)
+                target_w = max(1, int(target_w * scale_f))
+                target_h = max(1, int(target_h * scale_f))
+            img_a_pil = img_a_pil.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            img_b_pil = img_b_pil.resize((target_w, target_h), Image.Resampling.LANCZOS)
+            arr_a = np.array(img_a_pil, dtype=np.uint8)
+            arr_b = np.array(img_b_pil, dtype=np.uint8)
         else:
             # Different aspect ratios: downscale if exceeding max_dim, then pad bottom/right with white
-            if max(img_a.width, img_a.height) > max_dim:
-                scale_a = max_dim / max(img_a.width, img_a.height)
-                img_a = img_a.resize((max(1, int(img_a.width * scale_a)), max(1, int(img_a.height * scale_a))), Image.Resampling.LANCZOS)
-            if max(img_b.width, img_b.height) > max_dim:
-                scale_b = max_dim / max(img_b.width, img_b.height)
-                img_b = img_b.resize((max(1, int(img_b.width * scale_b)), max(1, int(img_b.height * scale_b))), Image.Resampling.LANCZOS)
-            arr_a_raw = np.array(img_a, dtype=np.uint8)
-            arr_b_raw = np.array(img_b, dtype=np.uint8)
+            if max(img_a_pil.width, img_a_pil.height) > max_dim:
+                sa = max_dim / max(img_a_pil.width, img_a_pil.height)
+                img_a_pil = img_a_pil.resize((max(1, int(img_a_pil.width * sa)), max(1, int(img_a_pil.height * sa))), Image.Resampling.LANCZOS)
+            if max(img_b_pil.width, img_b_pil.height) > max_dim:
+                sb = max_dim / max(img_b_pil.width, img_b_pil.height)
+                img_b_pil = img_b_pil.resize((max(1, int(img_b_pil.width * sb)), max(1, int(img_b_pil.height * sb))), Image.Resampling.LANCZOS)
+            arr_a_raw = np.array(img_a_pil, dtype=np.uint8)
+            arr_b_raw = np.array(img_b_pil, dtype=np.uint8)
             arr_a, arr_b = _pad_bottom_right(arr_a_raw, arr_b_raw)
 
         H, W = arr_a.shape[:2]
@@ -1520,32 +1522,16 @@ def compare_documents(bytes_a: bytes, filename_a: str,
         if is_pdf_a and is_pdf_b:
             text_diff = extract_text_diff(bytes_a, bytes_b, page)
 
-        # Generate and save overlay to 'OverlayComparison' folder for image comparisons
-        try:
-            output_folder = "OverlayComparison"
-            os.makedirs(output_folder, exist_ok=True)
-            name_a = os.path.splitext(os.path.basename(filename_a))[0] if filename_a else "File_A"
-            name_b = os.path.splitext(os.path.basename(filename_b))[0] if filename_b else "File_B"
-            gray1 = cv2.cvtColor(arr_a, cv2.COLOR_RGB2GRAY)
-            gray2 = cv2.cvtColor(arr_b, cv2.COLOR_RGB2GRAY)
-            _, mask1 = cv2.threshold(gray1, 240, 255, cv2.THRESH_BINARY_INV)
-            _, mask2 = cv2.threshold(gray2, 240, 255, cv2.THRESH_BINARY_INV)
-            removed_mask = cv2.bitwise_and(mask1, cv2.bitwise_not(mask2))
-            added_mask = cv2.bitwise_and(mask2, cv2.bitwise_not(mask1))
-            overlay = arr_a.copy()
-            overlay[removed_mask > 0] = [255, 0, 0]
-            overlay[added_mask > 0] = [0, 0, 255]
-            cv2.rectangle(overlay, (10, 10), (650, 80), (255, 255, 255), -1)
-            cv2.putText(overlay, "GRAY = COMMON", (20, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 100, 100), 2)
-            cv2.putText(overlay, "RED = REMOVED", (240, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (255, 0, 0), 2)
-            cv2.putText(overlay, "BLUE = ADDED", (470, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-            out_file = os.path.join(output_folder, f"{name_a}_VS_{name_b}_Page_{page}.png")
-            cv2.imwrite(out_file, cv2.cvtColor(overlay, cv2.COLOR_RGB2BGR))
-            print(f"Saved: {out_file}")
-            print(f"Removed={np.count_nonzero(removed_mask)}, Added={np.count_nonzero(added_mask)}")
-            print(f"\nResults saved in '{output_folder}'")
-        except Exception as ov_err:
-            logger.warning(f"Image overlay comparison warning: {ov_err}")
+    # Ensure arrays are always 3-channel RGB before building PIL images
+    def _to_rgb3(a: np.ndarray) -> np.ndarray:
+        if a.ndim == 2:
+            return np.stack([a, a, a], axis=2)
+        if a.shape[2] == 4:
+            return a[:, :, :3]
+        return a
+
+    arr_a = _to_rgb3(arr_a)
+    arr_b = _to_rgb3(arr_b)
 
     img_a_clean = Image.fromarray(arr_a, 'RGB')
     img_b_clean = Image.fromarray(arr_b, 'RGB')
@@ -1556,6 +1542,8 @@ def compare_documents(bytes_a: bytes, filename_a: str,
     )
 
     # 5. Completely Different guard
+    # When documents are completely unlike, suppress per-element bounding boxes
+    # (too many / meaningless) but retain pixel-level statistics.
     is_completely_different = False
     changed_pct = res['changed_pct']
 

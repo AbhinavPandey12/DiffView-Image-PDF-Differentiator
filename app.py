@@ -18,21 +18,25 @@ from PIL import Image, ImageOps, ImageDraw
 from scipy import ndimage
 from werkzeug.exceptions import HTTPException
 
-# PyMuPDF for fast PDF rendering
 import pymupdf as fitz
 import diff_engine
-from diff_engine import compare_pdfs_overlay, pdf_to_image
 
 app = Flask(__name__)
 # Allow uploads up to 128 MB
 app.config['MAX_CONTENT_LENGTH'] = 128 * 1024 * 1024
 app.config['MAX_DIFF_DIMENSION'] = int(os.environ.get('DIFFVIEW_MAX_DIMENSION', '1400'))
-# Always use JSON error handlers for /api/* instead of Werkzeug HTML tracebacks
-# (debug=True would otherwise hide the 500 handler and break the fetch client).
+# Keep PROPAGATE_EXCEPTIONS=False so custom @app.errorhandler functions
+# always receive exceptions for /api/* routes rather than Flask's default
+# behavior. When debug=True, also set this to prevent the Werkzeug debugger
+# from returning HTML error pages instead of JSON.
 app.config['PROPAGATE_EXCEPTIONS'] = False
 
 ALLOWED_EXTENSIONS = {'.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.gif', '.tif', '.tiff'}
 ALLOWED_IMAGE_FORMATS = {'PNG', 'JPEG', 'WEBP', 'BMP', 'GIF', 'TIFF'}
+logging.basicConfig(
+    level=logging.INFO,
+    format='[%(levelname)s] %(name)s: %(message)s',
+)
 logger = logging.getLogger(__name__)
 
 
@@ -858,5 +862,9 @@ if __name__ == '__main__':
     print('  DiffView — PDF & Image Comparator (Python Server)')
     print(f'  Application running at: http://127.0.0.1:{port}')
     print('=' * 60 + '\n')
-    app.run(debug=True, host='127.0.0.1', port=port)
+    # debug=False ensures Werkzeug's HTML debugger never replaces the JSON
+    # error handlers for /api/* routes.  Set FLASK_DEBUG=1 in environment
+    # only when you explicitly want the interactive debugger.
+    debug_mode = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(debug=debug_mode, host='127.0.0.1', port=port)
 
