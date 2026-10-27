@@ -1102,12 +1102,18 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
                       arr_a: np.ndarray, arr_b: np.ndarray,
                       changes: list[Change], changed_pixels_mask: np.ndarray) -> dict[str, Any]:
     """
-    Generate all visual overlays adhering to the requested color specs:
-      • Doc A: red = removed, amber = modified
-      • Doc B: green = added, amber = modified
-      • Heatmap: soft gray context + fill exact rects & residual changed pixels
-      • 3-Color: red = removed, green = added, amber = modified
+    Generate all visual overlays:
+      • Doc A highlighted: red boxes  = removed content  /  red+amber = modified
+      • Doc B highlighted: blue boxes = added content    /  blue+amber = modified
+      • Heatmap: grayed-down context + highlighted diff rects & residual pixels
+      • 3-Color:  red=removed, blue=added, amber=modified
       • Thumbnail snippets for inspector cards
+
+    IMPORTANT: Side-by-side highlights are driven exclusively by the structured
+    changes list (bounding boxes from text/drawing/pixel passes).  We do NOT
+    paint raw grayscale-mask differences onto the SBS overlays, because that
+    causes the entire page to be colored for documents that share similar layouts
+    but different content (e.g., two resumes or two invoices).
     """
     w, h = img_a_clean.size
 
@@ -1116,65 +1122,75 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
     for i, c in enumerate(changes):
         c.id = i + 1
 
-    # 1. Side-by-Side Highlighted Overlays
-    # Compute pixel difference masks matching user's threshold logic (< 240 non-white content)
-    gray_a = cv2.cvtColor(arr_a, cv2.COLOR_RGB2GRAY)
-    gray_b = cv2.cvtColor(arr_b, cv2.COLOR_RGB2GRAY)
-    _, mask_a = cv2.threshold(gray_a, 240, 255, cv2.THRESH_BINARY_INV)
-    _, mask_b = cv2.threshold(gray_b, 240, 255, cv2.THRESH_BINARY_INV)
-
-    removed_pixel_mask = (mask_a > 0) & (mask_b == 0)
-    added_pixel_mask = (mask_b > 0) & (mask_a == 0)
-
-    if changed_pixels_mask is not None and np.any(changed_pixels_mask):
-        removed_pixel_mask |= (changed_pixels_mask & (mask_a > 0))
-        added_pixel_mask |= (changed_pixels_mask & (mask_b > 0))
-
-    # Base A with Red pixel differences
-    arr_a_hl = arr_a.copy()
-    if np.any(removed_pixel_mask):
-        arr_a_hl[removed_pixel_mask] = [220, 38, 38]
-    img_a_base = Image.fromarray(arr_a_hl, 'RGB')
-
-    # Base B with Blue new items
-    arr_b_hl = arr_b.copy()
-    if np.any(added_pixel_mask):
-        arr_b_hl[added_pixel_mask] = [37, 99, 235]
-    img_b_base = Image.fromarray(arr_b_hl, 'RGB')
-
+    # ── 1. Side-by-Side Highlighted Overlays ──────────────────────────────────
+    # Use RGBA overlay on top of the clean original images so we can draw
+    # semi-transparent colored rectangles precisely around detected change regions.
+    #
+    # Color convention (spec):
+    #   removed  → red    on Doc A  (content that was in A, absent from B)
+    #   added    → blue   on Doc B  (content that is new in B, absent from A)
+    #   modified → red    on Doc A  AND  blue on Doc B  (changed at same location)
     ov_a = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     ov_b = Image.new('RGBA', (w, h), (0, 0, 0, 0))
     draw_oa = ImageDraw.Draw(ov_a)
     draw_ob = ImageDraw.Draw(ov_b)
+
+    RED_FILL    = (239, 68, 68, 55)
+    RED_OUT     = (220, 38, 38, 230)
+    BLUE_FILL   = (37, 99, 235, 55)
+    BLUE_OUT    = (29, 78, 216, 230)
+    AMBER_FILL  = (245, 158, 11, 55)
+    AMBER_OUT   = (217, 119, 6, 230)
 
     for c in changes:
         x0 = max(0, min(w - 1, c.x - 2))
         y0 = max(0, min(h - 1, c.y - 2))
         x1 = max(x0 + 1, min(w, c.x + c.width + 2))
         y1 = max(y0 + 1, min(h, c.y + c.height + 2))
-        radius = min(3, max(1, (x1 - x0) // 2, (y1 - y0) // 2))
+        radius = min(4, max(1, (x1 - x0) // 4, (y1 - y0) // 4))
 
         if c.change_type == 'removed':
+            # Content existed in A but not B → red box on A only
             draw_oa.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(239, 68, 68, 45), outline=(239, 68, 68, 220), width=2)
+                                      fill=RED_FILL, outline=RED_OUT, width=2)
         elif c.change_type == 'added':
+            # Content is new in B, absent from A → blue box on B only
             draw_ob.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(37, 99, 235, 45), outline=(37, 99, 235, 220), width=2)
+                                      fill=BLUE_FILL, outline=BLUE_OUT, width=2)
         else:
-            # Modified: Red on Document A, Blue on Document B
+            # Modified at the same location: red on A, blue on B
             draw_oa.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(239, 68, 68, 45), outline=(239, 68, 68, 220), width=2)
+                                      fill=RED_FILL, outline=RED_OUT, width=2)
             draw_ob.rounded_rectangle([x0, y0, x1, y1], radius=radius,
-                                      fill=(37, 99, 235, 45), outline=(37, 99, 235, 220), width=2)
+                                      fill=BLUE_FILL, outline=BLUE_OUT, width=2)
 
-    img_a_highlighted = Image.alpha_composite(img_a_base.convert('RGBA'), ov_a).convert('RGB')
-    img_b_highlighted = Image.alpha_composite(img_b_base.convert('RGBA'), ov_b).convert('RGB')
+    img_a_highlighted = Image.alpha_composite(img_a_clean.convert('RGBA'), ov_a).convert('RGB')
+    img_b_highlighted = Image.alpha_composite(img_b_clean.convert('RGBA'), ov_b).convert('RGB')
 
-    # 2. High-Contrast Heatmap Diff
-    diff_canvas = np.full((h, w, 3), 255, dtype=np.uint8)
+    # For the heatmap & 3-color views, compute pixel-level removed/added masks
+    # (these views CAN show per-pixel coloring; the SBS view must not).
+    gray_a = cv2.cvtColor(arr_a, cv2.COLOR_RGB2GRAY)
+    gray_b = cv2.cvtColor(arr_b, cv2.COLOR_RGB2GRAY)
+    _, mask_content_a = cv2.threshold(gray_a, 240, 255, cv2.THRESH_BINARY_INV)
+    _, mask_content_b = cv2.threshold(gray_b, 240, 255, cv2.THRESH_BINARY_INV)
+
+    # Restrict pixel masks to only the regions flagged by changed_pixels_mask
+    # so we don't paint the entire document when content differs everywhere.
+    if changed_pixels_mask is not None and np.any(changed_pixels_mask):
+        removed_pixel_mask = changed_pixels_mask & (mask_content_a > 0) & (mask_content_b == 0)
+        added_pixel_mask   = changed_pixels_mask & (mask_content_b > 0) & (mask_content_a == 0)
+        modified_pixel_mask = changed_pixels_mask & (mask_content_a > 0) & (mask_content_b > 0)
+    else:
+        removed_pixel_mask  = np.zeros((h, w), dtype=bool)
+        added_pixel_mask    = np.zeros((h, w), dtype=bool)
+        modified_pixel_mask = np.zeros((h, w), dtype=bool)
+
+    # ── 2. High-Contrast Heatmap Diff ─────────────────────────────────────────
+    # Gray-down the original A, then paint changed regions bright red.
     base_a = arr_a.copy()
-    diff_canvas[:] = np.clip(base_a * 0.78 + 52, 0, 255)
+    diff_canvas = np.clip(base_a.astype(np.float32) * 0.78 + 52, 0, 255).astype(np.uint8)
 
+    # Fill change bounding boxes with a light-red tint
     for c in changes:
         cx0 = max(0, min(w, c.x))
         cy0 = max(0, min(h, c.y))
@@ -1183,8 +1199,10 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
         if cx1 > cx0 and cy1 > cy0:
             diff_canvas[cy0:cy1, cx0:cx1] = [254, 226, 226]
 
-    if changed_pixels_mask is not None and np.any(changed_pixels_mask):
-        diff_canvas[changed_pixels_mask] = [220, 38, 38]
+    # Paint residual changed pixels bright red
+    residual_mask = removed_pixel_mask | added_pixel_mask | modified_pixel_mask
+    if np.any(residual_mask):
+        diff_canvas[residual_mask] = [220, 38, 38]
 
     diff_img = Image.fromarray(diff_canvas, 'RGB')
     draw_diff = ImageDraw.Draw(diff_img)
@@ -1196,9 +1214,8 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
         radius = min(3, max(1, (x1 - x0) // 2, (y1 - y0) // 2))
         draw_diff.rounded_rectangle([x0, y0, x1, y1], radius=radius, outline=(220, 38, 38), width=2)
 
-    # 3. 3-Color Visual Diff (Removed vs Added vs Modified)
-    diff_3c = np.full((h, w, 3), 255, dtype=np.uint8)
-    diff_3c[:] = np.clip(base_a * 0.78 + 52, 0, 255)
+    # ── 3. 3-Color Visual Diff (Removed=Red / Added=Blue / Modified=Amber) ────
+    diff_3c = np.clip(base_a.astype(np.float32) * 0.78 + 52, 0, 255).astype(np.uint8)
 
     for c in changes:
         cx0 = max(0, min(w, c.x))
@@ -1217,6 +1234,8 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
         diff_3c[removed_pixel_mask] = [239, 68, 68]
     if np.any(added_pixel_mask):
         diff_3c[added_pixel_mask] = [37, 99, 235]
+    if np.any(modified_pixel_mask):
+        diff_3c[modified_pixel_mask] = [245, 158, 11]
 
     diff_3c_img = Image.fromarray(diff_3c, 'RGB')
     draw_3c = ImageDraw.Draw(diff_3c_img)
@@ -1317,49 +1336,62 @@ def _generate_visuals(img_a_clean: Image.Image, img_b_clean: Image.Image,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def extract_text_diff(bytes_a: bytes, bytes_b: bytes, page_num: int = 1) -> list[dict]:
-    """Extract line-level text differences for inspector view."""
+    """
+    Extract line-level text differences for inspector view.
+    Only operates on actual PDF files; returns [] silently for images.
+    Never raises — all exceptions are swallowed so they never cause a 500.
+    """
     if not _HAS_FITZ:
         return []
+
+    def _quick_is_pdf(b: bytes) -> bool:
+        return b'%PDF-' in b[:8192]
+
+    if not _quick_is_pdf(bytes_a) or not _quick_is_pdf(bytes_b):
+        return []
+
+    doc_a = doc_b = None
     try:
         doc_a = _open_pdf(bytes_a)
         doc_b = _open_pdf(bytes_b)
 
-        idx_a = max(0, min(page_num - 1, doc_a.page_count - 1)) if doc_a.page_count > 0 else 0
-        idx_b = max(0, min(page_num - 1, doc_b.page_count - 1)) if doc_b.page_count > 0 else 0
+        idx_a = max(0, min(page_num - 1, doc_a.page_count - 1))
+        idx_b = max(0, min(page_num - 1, doc_b.page_count - 1))
 
         t_a = doc_a[idx_a].get_text('text') if doc_a.page_count > 0 else ''
         t_b = doc_b[idx_b].get_text('text') if doc_b.page_count > 0 else ''
 
-        try:
-            if not doc_a.is_closed:
-                doc_a.close()
-            if not doc_b.is_closed:
-                doc_b.close()
-        except Exception:
-            pass
-
-        lines_a = [l.strip() for l in t_a.splitlines() if l.strip()]
-        lines_b = [l.strip() for l in t_b.splitlines() if l.strip()]
+        lines_a = [ln.strip() for ln in t_a.splitlines() if ln.strip()]
+        lines_b = [ln.strip() for ln in t_b.splitlines() if ln.strip()]
 
         if not lines_a and not lines_b:
             return []
 
-        matcher = difflib.SequenceMatcher(None, lines_a, lines_b)
+        matcher = difflib.SequenceMatcher(None, lines_a, lines_b, autojunk=False)
         text_changes = []
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
                 continue
             orig = lines_a[i1:i2]
-            rev = lines_b[j1:j2]
+            rev  = lines_b[j1:j2]
             text_changes.append({
                 'type': 'modified' if tag == 'replace' else ('deleted' if tag == 'delete' else 'added'),
                 'original': ' '.join(orig),
-                'revised': ' '.join(rev),
+                'revised':  ' '.join(rev),
             })
         return text_changes
+
     except Exception:
-        logger.exception("Text diff extraction failed")
+        logger.warning("Text diff extraction skipped (non-critical)", exc_info=True)
         return []
+    finally:
+        for _d in (doc_a, doc_b):
+            if _d is not None:
+                try:
+                    if not _d.is_closed:
+                        _d.close()
+                except Exception:
+                    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
